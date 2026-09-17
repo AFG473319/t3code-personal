@@ -79,7 +79,9 @@ jobs:
           run-install: false
 
       - name: Install dependencies
-        run: vp install --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts...
+        # Full install (like upstream CI): the recursive typecheck touches
+        # every workspace, e.g. apps/marketing needs its astro binary.
+        run: vp install
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
