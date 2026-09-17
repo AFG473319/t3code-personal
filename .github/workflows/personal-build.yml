@@ -210,7 +210,7 @@ jobs:
           fi
           # Delete-then-create: a previous partial publish (e.g. a flaked
           # big-asset upload) must not block the completed build.
-          gh release delete "$tag" --cleanup-tag --yes || true
+          gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
           # shellcheck disable=SC2086
           gh release create "$tag" release/* \
             --repo "$GITHUB_REPOSITORY" \

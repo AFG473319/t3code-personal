@@ -64,7 +64,7 @@ jobs:
           else
             pre=""
           fi
-          gh release delete "${{ inputs.tag }}" --cleanup-tag --yes || true
+          gh release delete "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
           # shellcheck disable=SC2086
           gh release create "${{ inputs.tag }}" release/* \
             --repo "$GITHUB_REPOSITORY" \
