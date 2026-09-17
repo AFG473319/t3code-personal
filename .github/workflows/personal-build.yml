@@ -65,9 +65,9 @@ jobs:
           if [[ -n "${{ inputs.ref }}" ]]; then
             ref="${{ inputs.ref }}"
           elif [[ "$channel" == "nightly" ]]; then
-            # --paginate evaluates the filter once per page, so take the
-            # first line: the API returns newest first.
-            ref=$(gh api repos/pingdotgg/t3code/releases --paginate --jq '[.[] | select(.prerelease and (.tag_name | contains("-nightly.")))] | .[0].tag_name' | head -n 1 | tr -d ' \t\r\n')
+            # Newest 100 releases always contain the newest nightly (upstream
+            # ships several a day); one request, no pipe, no SIGPIPE.
+            ref=$(gh api 'repos/pingdotgg/t3code/releases?per_page=100' --jq '[.[] | select(.prerelease and (.tag_name | contains("-nightly.")))] | .[0].tag_name // empty')
           else
             ref=$(gh api repos/pingdotgg/t3code/releases/latest --jq .tag_name)
           fi
