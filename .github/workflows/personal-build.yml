@@ -128,7 +128,16 @@ jobs:
         run: |
           set -euo pipefail
           base=$(node -p "require('./apps/server/package.json').version")
-          version="$base-personal.$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}"
+          # Nightly-line builds keep the -nightly. stamp so the app reports
+          # the Nightly channel (product name, icons, updater feed) matching
+          # the prerelease they publish to; stable builds use -personal. so
+          # the updater follows the stable fork releases. Neither matches the
+          # -preview. pattern, so an update feed is always emitted.
+          if [[ "${{ needs.check.outputs.prerelease }}" == "true" ]]; then
+            version="$base-nightly.$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}"
+          else
+            version="$base-personal.$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}"
+          fi
           echo "Build version: $version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
