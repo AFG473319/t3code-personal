@@ -1,0 +1,129 @@
+name: personal-build
+
+# Personal T3 Code build: any upstream T3 Code version + the tiny personal
+# patch (20s OpenCode version probe, T3 Code Personal identity), packaged as
+# an unsigned Windows installer. Runs only when you ask it to
+# (Actions -> personal-build -> Run workflow). Free on public repos.
+#
+# Everything else flows in normally from upstream: pick the stable line
+# (default), the nightly line, or pin an exact tag/SHA. The `-preview.`
+# version stamp means the app ships with no update feed, so it never fights
+# the official install over updates.
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Upstream line to build on"
+        required: true
+        default: stable
+        type: choice
+        options: [stable, nightly]
+      ref:
+        description: "Exact upstream tag or full SHA (overrides channel)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  win-x64:
+    name: Personal Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Resolve upstream ref
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${{ inputs.ref }}" ]]; then
+            ref="${{ inputs.ref }}"
+          elif [[ "${{ inputs.channel }}" == "nightly" ]]; then
+            ref=$(gh api repos/pingdotgg/t3code/releases --paginate --jq '[.[] | select(.prerelease and (.tag_name | contains("-nightly.")))] | .[0].tag_name')
+          else
+            ref=$(gh api repos/pingdotgg/t3code/releases/latest --jq .tag_name)
+          fi
+          if [[ -z "$ref" ]]; then
+            echo "Could not resolve an upstream ref." >&2
+            exit 1
+          fi
+          echo "Upstream ref: $ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          base="${ref#v}"
+          base="${base%%-*}"
+          echo "version=$base-preview.$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout upstream and apply personal patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add upstream "${GITHUB_SERVER_URL}/pingdotgg/t3code.git"
+          git fetch --no-tags --depth=1 upstream "${{ steps.upstream.outputs.ref }}"
+          git sparse-checkout set --no-cone '/*' '!/.repos/'
+          git checkout "$(git rev-parse 'FETCH_HEAD^{commit}')"
+          curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/.github/personal/personal.patch" -o /tmp/personal.patch
+          git apply --check /tmp/personal.patch
+          git apply --stat /tmp/personal.patch
+          git apply /tmp/personal.patch
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: false
+
+      - name: Install dependencies
+        run: vp install --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts...
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install Spectre-mitigated MSVC libs
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installPath = & $vswhere -products * -latest -property installationPath
+          $setupExe = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+          $proc = Start-Process -FilePath $setupExe `
+            -ArgumentList "modify", "--installPath", "`"$installPath`"", "--add", `
+            "Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre", "--quiet", "--norestart" `
+            -Wait -PassThru -NoNewWindow
+          if ($null -eq $proc -or $proc.ExitCode -ne 0) {
+            $code = if ($null -ne $proc) { $proc.ExitCode } else { 1 }
+            Write-Error "Visual Studio Installer failed with exit code $code"
+            exit $code
+          }
+
+      - name: Typecheck
+        run: vp run typecheck
+
+      - name: Test patched server suites
+        working-directory: apps/server
+        run: vp test run src/provider/Layers/OpenCodeProvider.test.ts src/cloud/bootService.test.ts
+
+      - name: Test patched desktop suites
+        working-directory: apps/desktop
+        run: vp test run src/app/DesktopEnvironment.test.ts src/app/DesktopAppIdentity.test.ts src/app/DesktopClerk.test.ts src/app/DesktopPreReadyPlatform.test.ts src/app/DesktopEarlyElectronStartup.test.ts
+
+      - name: Build JS bundle
+        run: vp run build:desktop
+
+      - name: Build unsigned Windows installer
+        shell: bash
+        run: node scripts/build-desktop-artifact.ts --platform win --target nsis --arch x64 --build-version "${{ steps.upstream.outputs.version }}" --verbose
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: t3-code-personal-win-x64
+          path: release/*
+          if-no-files-found: error

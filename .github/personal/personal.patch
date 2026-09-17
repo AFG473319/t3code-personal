@@ -1,0 +1,528 @@
+diff --git a/apps/desktop/package.json b/apps/desktop/package.json
+index 6e21f871..d2cfe955 100644
+--- a/apps/desktop/package.json
++++ b/apps/desktop/package.json
+@@ -40,5 +40,5 @@
+     "tailwindcss": "^4.0.0",
+     "vite-plus": "catalog:"
+   },
+-  "productName": "T3 Code (Alpha)"
++  "productName": "T3 Code Personal (Alpha)"
+ }
+diff --git a/apps/desktop/scripts/electron-launcher.mjs b/apps/desktop/scripts/electron-launcher.mjs
+index 48f66ab7..b4b8c69b 100644
+--- a/apps/desktop/scripts/electron-launcher.mjs
++++ b/apps/desktop/scripts/electron-launcher.mjs
+@@ -15,10 +15,10 @@ const repoRoot = NodePath.resolve(desktopDir, "..", "..");
+ const devBundleIdSuffix = NodePath.basename(repoRoot)
+   .toLowerCase()
+   .replaceAll(/[^a-z0-9]+/g, "");
+-const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
++const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code Personal (Alpha)";
+ const APP_BUNDLE_ID = isDevelopment
+   ? `com.t3tools.t3code.dev.${devBundleIdSuffix || "local"}`
+-  : "com.t3tools.t3code";
++  : "com.t3tools.t3code.personal";
+ const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
+ const LAUNCHER_VERSION = 19;
+ const developmentMacIconPngPath = NodePath.join(
+diff --git a/apps/desktop/src/app/DesktopAppIdentity.test.ts b/apps/desktop/src/app/DesktopAppIdentity.test.ts
+index 71bcf5f7..9da87588 100644
+--- a/apps/desktop/src/app/DesktopAppIdentity.test.ts
++++ b/apps/desktop/src/app/DesktopAppIdentity.test.ts
+@@ -131,7 +131,7 @@ const withIdentity = <A, E, R>(
+               input.legacyPathProbeError
+                 ? Effect.fail(input.legacyPathProbeError)
+                 : Effect.succeed(
+-                    input.legacyPathExists === true && path.includes("T3 Code (Alpha)"),
++                    input.legacyPathExists === true && path.includes("T3 Code Personal (Alpha)"),
+                   ),
+             readFileString: () =>
+               Effect.succeed(input.packageJson ?? '{"t3codeCommitHash":"abcdef1234567890"}'),
+@@ -152,14 +152,14 @@ describe("DesktopAppIdentity", () => {
+         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
+         const userDataPath = yield* identity.resolveUserDataPath;
+ 
+-        assert.equal(userDataPath, "/Users/alice/Library/Application Support/T3 Code (Alpha)");
++        assert.equal(userDataPath, "/Users/alice/Library/Application Support/T3 Code Personal (Alpha)");
+       }),
+       { legacyPathExists: true },
+     ),
+   );
+ 
+   it.effect("preserves failures while inspecting the legacy userData path", () => {
+-    const legacyPath = "/Users/alice/Library/Application Support/T3 Code (Alpha)";
++    const legacyPath = "/Users/alice/Library/Application Support/T3 Code Personal (Alpha)";
+     const cause = PlatformError.systemError({
+       _tag: "PermissionDenied",
+       module: "FileSystem",
+@@ -197,8 +197,8 @@ describe("DesktopAppIdentity", () => {
+         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
+         yield* identity.configure;
+ 
+-        assert.deepEqual(calls.setName, ["T3 Code (Alpha)"]);
+-        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, "T3 Code (Alpha)");
++        assert.deepEqual(calls.setName, ["T3 Code Personal (Alpha)"]);
++        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, "T3 Code Personal (Alpha)");
+         assert.equal(calls.setAboutPanelOptions[0]?.applicationVersion, "1.2.3");
+         assert.equal(calls.setAboutPanelOptions[0]?.version, "0123456789ab");
+         // Packaged: the bundle's own icon stands, so a custom one the user
+diff --git a/apps/desktop/src/app/DesktopClerk.test.ts b/apps/desktop/src/app/DesktopClerk.test.ts
+index 1641149e..2bb31e64 100644
+--- a/apps/desktop/src/app/DesktopClerk.test.ts
++++ b/apps/desktop/src/app/DesktopClerk.test.ts
+@@ -34,8 +34,8 @@ const makeDesktopClerkLayer = (isDevelopment = true, events: string[] = []) => {
+     stateDir: "/tmp/t3-state",
+     isDevelopment,
+     appDataDirectory: "/tmp/app-data",
+-    userDataDirName: isDevelopment ? "t3code-dev" : "t3code",
+-    legacyUserDataDirName: isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)",
++    userDataDirName: isDevelopment ? "t3code-dev" : "t3code-personal",
++    legacyUserDataDirName: isDevelopment ? "T3 Code (Dev)" : "T3 Code Personal (Alpha)",
+     path: { join: (...parts: ReadonlyArray<string>) => parts.join("/") },
+   } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]);
+ 
+diff --git a/apps/desktop/src/app/DesktopClerk.ts b/apps/desktop/src/app/DesktopClerk.ts
+index 072a1871..05b7d0b3 100644
+--- a/apps/desktop/src/app/DesktopClerk.ts
++++ b/apps/desktop/src/app/DesktopClerk.ts
+@@ -92,7 +92,7 @@ export const make = Effect.gen(function* () {
+   // creates that directory when the lock is acquired. The SDK bridge takes
+   // the lock at creation, so userData must already point at the real
+   // directory here — under the default productName-derived path, acquiring
+-  // the lock would create "T3 Code (Alpha)" and make the legacy-install
++  // the lock would create "T3 Code Personal (Alpha)" and make the legacy-install
+   // detection in resolveUserDataPath match on fresh installs.
+   const userDataPath = yield* DesktopAppIdentity.resolveUserDataPath;
+   yield* electronApp.setPath("userData", userDataPath);
+diff --git a/apps/desktop/src/app/DesktopEarlyElectronStartup.ts b/apps/desktop/src/app/DesktopEarlyElectronStartup.ts
+index 95922bdf..957434f9 100644
+--- a/apps/desktop/src/app/DesktopEarlyElectronStartup.ts
++++ b/apps/desktop/src/app/DesktopEarlyElectronStartup.ts
+@@ -32,7 +32,7 @@ export interface EarlyLinuxElectronOptions {
+ }
+ 
+ export const resolveLinuxDesktopEntryName = (isDevelopment: boolean): string =>
+-  isDevelopment ? "com.t3tools.T3Code.Development.desktop" : "com.t3tools.T3Code.desktop";
++  isDevelopment ? "com.t3tools.T3Code.Development.desktop" : "com.t3tools.T3Code.Personal.desktop";
+ 
+ const trimNonEmpty = (value: string | undefined): string | null => {
+   const trimmed = value?.trim();
+@@ -88,7 +88,7 @@ export function resolveEarlyLinuxElectronOptions(
+   const isDevelopment = isDevelopmentEnvironment(input.env);
+   return {
+     isDevelopment,
+-    linuxWmClass: isDevelopment ? "t3code-dev" : "t3code",
++    linuxWmClass: isDevelopment ? "t3code-dev" : "t3code-personal",
+     linuxDesktopEntryName: resolveLinuxDesktopEntryName(isDevelopment),
+     passwordStore: resolveLinuxPasswordStoreSwitch({
+       preference,
+diff --git a/apps/desktop/src/app/DesktopEnvironment.test.ts b/apps/desktop/src/app/DesktopEnvironment.test.ts
+index 0e5fbecd..b894ef3e 100644
+--- a/apps/desktop/src/app/DesktopEnvironment.test.ts
++++ b/apps/desktop/src/app/DesktopEnvironment.test.ts
+@@ -147,7 +147,7 @@ describe("DesktopEnvironment", () => {
+         resourcesPath: "/tmp/.mount_t3code/resources",
+       });
+ 
+-      assert.equal(environment.linuxDesktopEntryName, "com.t3tools.T3Code.desktop");
++      assert.equal(environment.linuxDesktopEntryName, "com.t3tools.T3Code.Personal.desktop");
+     }),
+   );
+ 
+diff --git a/apps/desktop/src/app/DesktopEnvironment.ts b/apps/desktop/src/app/DesktopEnvironment.ts
+index e7a489d5..7ad9f8f6 100644
+--- a/apps/desktop/src/app/DesktopEnvironment.ts
++++ b/apps/desktop/src/app/DesktopEnvironment.ts
+@@ -91,7 +91,7 @@ export class DesktopEnvironment extends Context.Service<
+   }
+ >()("@t3tools/desktop/app/DesktopEnvironment") {}
+ 
+-const APP_BASE_NAME = "T3 Code";
++const APP_BASE_NAME = "T3 Code Personal";
+ 
+ function resolveDesktopAppStageLabel(input: {
+   readonly isDevelopment: boolean;
+@@ -184,8 +184,8 @@ const make = Effect.fn("desktop.environment.make")(function* (
+     joinPath: path.join,
+     t3Home: config.t3Home,
+   });
+-  const userDataDirName = isDevelopment ? "t3code-dev" : "t3code";
+-  const legacyUserDataDirName = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
++  const userDataDirName = isDevelopment ? "t3code-dev" : "t3code-personal";
++  const legacyUserDataDirName = isDevelopment ? "T3 Code (Dev)" : "T3 Code Personal (Alpha)";
+   const linuxApplicationsDir = path.join(
+     Option.getOrElse(config.xdgDataHome, () => path.join(homeDirectory, ".local", "share")),
+     "applications",
+@@ -233,10 +233,10 @@ const make = Effect.fn("desktop.environment.make")(function* (
+     branding,
+     displayName,
+     appUserModelId: Option.getOrElse(config.appUserModelIdOverride, () =>
+-      isDevelopment ? "com.t3tools.t3code.dev" : "com.t3tools.t3code",
++      isDevelopment ? "com.t3tools.t3code.dev" : "com.t3tools.t3code.personal",
+     ),
+     linuxDesktopEntryName: resolveLinuxDesktopEntryName(isDevelopment),
+-    linuxWmClass: isDevelopment ? "t3code-dev" : "t3code",
++    linuxWmClass: isDevelopment ? "t3code-dev" : "t3code-personal",
+     linuxApplicationsDir,
+     appImagePath: config.appImagePath,
+     userDataDirName,
+diff --git a/apps/desktop/src/app/DesktopPreReadyPlatform.test.ts b/apps/desktop/src/app/DesktopPreReadyPlatform.test.ts
+index 9ddaf40c..de694763 100644
+--- a/apps/desktop/src/app/DesktopPreReadyPlatform.test.ts
++++ b/apps/desktop/src/app/DesktopPreReadyPlatform.test.ts
+@@ -89,7 +89,7 @@ describe("DesktopPreReadyPlatform", () => {
+           desktopName = name;
+         });
+         writeFileSyncMock.mockImplementation((path: string, contents: string) => {
+-          if (path === "/xdg/applications/com.t3tools.T3Code.desktop") desktopEntry = contents;
++          if (path === "/xdg/applications/com.t3tools.T3Code.Personal.desktop") desktopEntry = contents;
+         });
+ 
+         return Effect.scoped(
+@@ -101,9 +101,9 @@ describe("DesktopPreReadyPlatform", () => {
+               ),
+             );
+             const identity = yield* Effect.promise(() => portalIdentity);
+-            assert.equal(identity.desktopName, "com.t3tools.T3Code.desktop");
++            assert.equal(identity.desktopName, "com.t3tools.T3Code.Personal.desktop");
+             assert.include(identity.desktopEntry ?? "", 'Exec="/Applications/current.AppImage" %U');
+-            assert.include(identity.desktopEntry ?? "", "Name=T3 Code (Alpha)");
++            assert.include(identity.desktopEntry ?? "", "Name=T3 Code Personal (Alpha)");
+             assert.include(identity.desktopEntry ?? "", "MimeType=x-scheme-handler/t3code;");
+           }),
+         ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
+diff --git a/apps/server/src/cloud/bootService.test.ts b/apps/server/src/cloud/bootService.test.ts
+index 25609853..241b16b0 100644
+--- a/apps/server/src/cloud/bootService.test.ts
++++ b/apps/server/src/cloud/bootService.test.ts
+@@ -29,7 +29,7 @@ const linuxPlan = {
+   program: [linuxRuntime, "__service-launcher"],
+   baseDir: "/home/theo/.t3",
+   logPath: "/home/theo/.t3/userdata/logs/boot-service.log",
+-  unitPath: "/home/theo/.config/systemd/user/t3code.service",
++  unitPath: "/home/theo/.config/systemd/user/t3code-personal.service",
+ };
+ 
+ it("runs the pinned runtime's own executable as the systemd launcher", () => {
+@@ -45,7 +45,7 @@ it("reads the served T3 home back out of a rendered unit or plist", () => {
+     program: [`${baseDir}/runtime/versions/1.2.3/t3`, "__service-launcher"],
+     baseDir,
+     logPath: `${baseDir}/userdata/logs/boot-service.log`,
+-    unitPath: "/home/theo/.config/systemd/user/t3code.service",
++    unitPath: "/home/theo/.config/systemd/user/t3code-personal.service",
+   });
+ 
+   expect(
+@@ -79,7 +79,7 @@ const macPlan = {
+   program: [macRuntime, "__service-launcher"],
+   baseDir: "/Users/theo/.t3",
+   logPath: "/Users/theo/.t3/userdata/logs/boot-service.log",
+-  unitPath: "/Users/theo/Library/LaunchAgents/com.t3tools.t3code.service.plist",
++  unitPath: "/Users/theo/Library/LaunchAgents/com.t3tools.t3code.personal.service.plist",
+ };
+ const macInstallerPath =
+   "/opt/homebrew/bin:/Users/theo/.npm-global/bin:/Users/theo/.nvm/versions/node/v22.16.0/bin:/usr/bin:/bin";
+@@ -170,11 +170,11 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
+       const failed = command === control.failCommand;
+       if (!failed && command === "loginctl enable-linger --no-ask-password 501")
+         control.linger = "yes";
+-      if (!failed && command === "systemctl --user enable t3code.service") control.enabled = true;
+-      if (!failed && command === "systemctl --user restart t3code.service") control.active = true;
++      if (!failed && command === "systemctl --user enable t3code-personal.service") control.enabled = true;
++      if (!failed && command === "systemctl --user restart t3code-personal.service") control.active = true;
+       if (
+         control.stateAfterStop !== undefined &&
+-        (command === "systemctl --user stop t3code.service" ||
++        (command === "systemctl --user stop t3code-personal.service" ||
+           command.startsWith("launchctl bootout --wait "))
+       ) {
+         yield* fs.writeFileString(statePath, control.stateAfterStop).pipe(Effect.orDie);
+@@ -302,7 +302,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
+         );
+         expect(yield* fs.readFileString(statePath)).toBe(before);
+         expect(yield* fs.readFileString(plan.unitPath)).toBe(unit);
+-        expect(commands).not.toContain("systemctl --user stop t3code.service");
++        expect(commands).not.toContain("systemctl --user stop t3code-personal.service");
+       }),
+   );
+ 
+@@ -377,7 +377,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
+       expect((yield* service.status).installed).toBe(false);
+       // The stop can block up to systemd's 90s TimeoutStopSec; the runner's
+       // 60s default would cancel it mid-shutdown.
+-      expect(timeouts.get("systemctl --user disable --now t3code.service")).toEqual(
++      expect(timeouts.get("systemctl --user disable --now t3code-personal.service")).toEqual(
+         Duration.seconds(120),
+       );
+     }),
+@@ -449,9 +449,9 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
+           ),
+         ).toEqual(
+           platform === "linux"
+-            ? ["systemctl --user stop t3code.service", "systemctl --user restart t3code.service"]
++            ? ["systemctl --user stop t3code-personal.service", "systemctl --user restart t3code-personal.service"]
+             : [
+-                "launchctl bootout --wait gui/501/com.t3tools.t3code.service",
++                "launchctl bootout --wait gui/501/com.t3tools.t3code.personal.service",
+                 `launchctl bootstrap gui/501 ${plan.unitPath}`,
+               ],
+         );
+@@ -579,10 +579,10 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
+           (command) => command.startsWith("systemctl ") && !command.includes("show-environment"),
+         ),
+       ).toEqual([
+-        "systemctl --user stop t3code.service",
++        "systemctl --user stop t3code-personal.service",
+         "systemctl --user daemon-reload",
+-        "systemctl --user enable t3code.service",
+-        "systemctl --user restart t3code.service",
++        "systemctl --user enable t3code-personal.service",
++        "systemctl --user restart t3code-personal.service",
+       ]);
+     }),
+   );
+@@ -615,9 +615,9 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
+           (command) => command.startsWith("systemctl ") && !command.includes("show-environment"),
+         ),
+       ).toEqual([
+-        "systemctl --user stop t3code.service",
++        "systemctl --user stop t3code-personal.service",
+         "systemctl --user daemon-reload",
+-        "systemctl --user restart t3code.service",
++        "systemctl --user restart t3code-personal.service",
+       ]);
+     }),
+   );
+@@ -636,9 +636,9 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
+           (command) => command.startsWith("systemctl ") && !command.includes("show-environment"),
+         ),
+       ).toEqual([
+-        "systemctl --user stop t3code.service",
++        "systemctl --user stop t3code-personal.service",
+         "systemctl --user daemon-reload",
+-        "systemctl --user restart t3code.service",
++        "systemctl --user restart t3code-personal.service",
+       ]);
+     }),
+   );
+@@ -671,8 +671,8 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
+             (command) => command.startsWith("systemctl ") && !command.includes("show-environment"),
+           ),
+         ).toEqual([
+-          "systemctl --user stop t3code.service",
+-          "systemctl --user restart t3code.service",
++          "systemctl --user stop t3code-personal.service",
++          "systemctl --user restart t3code-personal.service",
+         ]);
+       }
+     }),
+@@ -694,7 +694,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
+ 
+       expect(
+         plan.unitPath.endsWith(
+-          path.join("Library", "LaunchAgents", "com.t3tools.t3code.service.plist"),
++          path.join("Library", "LaunchAgents", "com.t3tools.t3code.personal.service.plist"),
+         ),
+       ).toBe(true);
+       expect(yield* fs.readFileString(plan.unitPath)).toContain(
+@@ -716,7 +716,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
+       expect(commands.some((command) => command.startsWith("systemctl "))).toBe(false);
+       // A bootout can block up to the plist's 90s ExitTimeOut; the runner's
+       // 60s default would cancel it and let bootstrap race a loaded job.
+-      expect(timeouts.get("launchctl bootout --wait gui/501/com.t3tools.t3code.service")).toEqual(
++      expect(timeouts.get("launchctl bootout --wait gui/501/com.t3tools.t3code.personal.service")).toEqual(
+         Duration.seconds(120),
+       );
+     }),
+@@ -733,8 +733,8 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
+       const error = yield* service.install().pipe(Effect.flip);
+       expect(error._tag).toBe("BootServiceCommandError");
+       expect(commands.filter((command) => command.startsWith("launchctl "))).toEqual([
+-        "launchctl bootout --wait gui/501/com.t3tools.t3code.service",
+-        "launchctl enable gui/501/com.t3tools.t3code.service",
++        "launchctl bootout --wait gui/501/com.t3tools.t3code.personal.service",
++        "launchctl enable gui/501/com.t3tools.t3code.personal.service",
+         `launchctl bootstrap gui/501 ${plistPath}`,
+         `launchctl bootstrap gui/501 ${plistPath}`,
+       ]);
+@@ -796,7 +796,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
+     Effect.gen(function* () {
+       const { service, control } = yield* makeHarness("darwin");
+       yield* service.install();
+-      control.failCommand = "launchctl bootout --wait gui/501/com.t3tools.t3code.service";
++      control.failCommand = "launchctl bootout --wait gui/501/com.t3tools.t3code.personal.service";
+ 
+       yield* service.install();
+       expect((yield* service.status).current).toBe(true);
+@@ -828,7 +828,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
+         );
+         expect(serviceStateHasPendingUpdate(yield* fs.readFileString(statePath))).toBe(true);
+         expect(commands.filter((command) => command.startsWith("launchctl "))).toEqual([
+-          "launchctl bootout --wait gui/501/com.t3tools.t3code.service",
++          "launchctl bootout --wait gui/501/com.t3tools.t3code.personal.service",
+           `launchctl bootstrap gui/501 ${plistPath}`,
+         ]);
+       }
+diff --git a/apps/server/src/cloud/bootService.ts b/apps/server/src/cloud/bootService.ts
+index 24495c4c..dd219183 100644
+--- a/apps/server/src/cloud/bootService.ts
++++ b/apps/server/src/cloud/bootService.ts
+@@ -36,11 +36,11 @@ import {
+   type ServiceState,
+ } from "./serviceProtocol.ts";
+ 
+-const BOOT_SERVICE_NAME = "t3code";
++const BOOT_SERVICE_NAME = "t3code-personal";
+ const BOOT_SERVICE_UNIT_FILE = `${BOOT_SERVICE_NAME}.service`;
+ // `.service` suffix keeps the label distinct from the desktop app's bundle id
+-// (com.t3tools.t3code), so launchd and TCC records never collide.
+-const BOOT_SERVICE_LAUNCHD_LABEL = "com.t3tools.t3code.service";
++// (com.t3tools.t3code.personal), so launchd and TCC records never collide.
++const BOOT_SERVICE_LAUNCHD_LABEL = "com.t3tools.t3code.personal.service";
+ const BOOT_SERVICE_PLIST_FILE = `${BOOT_SERVICE_LAUNCHD_LABEL}.plist`;
+ const BOOT_SERVICE_UNIT_ENV = "T3_BOOT_SERVICE_UNIT";
+ 
+@@ -461,7 +461,7 @@ export function formatBootServiceProblem(problem: BootServiceProblem): string {
+     case "service-disabled":
+       return "The service is not enabled to start automatically. Run `t3 service install` to repair it.";
+     case "service-stopped":
+-      return "The service is not running. Check the service log and `systemctl --user status t3code.service`, then run `t3 service install`.";
++      return "The service is not running. Check the service log and `systemctl --user status t3code-personal.service`, then run `t3 service install`.";
+     case "restart-pending":
+       return "A newer version is installed but the service is still running the previous one. Run `t3 service restart` to switch.";
+   }
+diff --git a/apps/server/src/provider/Layers/OpenCodeProvider.test.ts b/apps/server/src/provider/Layers/OpenCodeProvider.test.ts
+index b50a51f6..65b8936b 100644
+--- a/apps/server/src/provider/Layers/OpenCodeProvider.test.ts
++++ b/apps/server/src/provider/Layers/OpenCodeProvider.test.ts
+@@ -366,14 +366,14 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
+       const probeFiber = yield* checkProvider(makeOpenCodeSettings()).pipe(Effect.forkChild);
+ 
+       yield* Effect.yieldNow;
+-      yield* TestClock.adjust("4 seconds");
++      yield* TestClock.adjust("20 seconds");
+       const snapshot = yield* Fiber.join(probeFiber);
+ 
+       NodeAssert.equal(snapshot.status, "error");
+       NodeAssert.equal(snapshot.installed, true);
+       NodeAssert.equal(
+         snapshot.message,
+-        "Failed to execute OpenCode CLI health check: OpenCode CLI version probe timed out after 4 seconds.",
++        "Failed to execute OpenCode CLI health check: OpenCode CLI version probe timed out after 20 seconds.",
+       );
+     }).pipe(Effect.provide(TestClock.layer())),
+   );
+diff --git a/apps/server/src/provider/Layers/OpenCodeProvider.ts b/apps/server/src/provider/Layers/OpenCodeProvider.ts
+index 0495f8b3..5620f22d 100644
+--- a/apps/server/src/provider/Layers/OpenCodeProvider.ts
++++ b/apps/server/src/provider/Layers/OpenCodeProvider.ts
+@@ -33,7 +33,7 @@ const OPENCODE_PRESENTATION = {
+   displayName: "OpenCode",
+   showInteractionModeToggle: false,
+ } as const;
+-const OPENCODE_VERSION_PROBE_TIMEOUT = "4 seconds";
++const OPENCODE_VERSION_PROBE_TIMEOUT = "20 seconds";
+ 
+ class OpenCodeProbeError extends Data.TaggedError("OpenCodeProbeError")<{
+   readonly cause?: unknown;
+diff --git a/scripts/build-desktop-artifact.test.ts b/scripts/build-desktop-artifact.test.ts
+index 08d7cf10..a02f4e29 100644
+--- a/scripts/build-desktop-artifact.test.ts
++++ b/scripts/build-desktop-artifact.test.ts
+@@ -254,8 +254,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
+   });
+ 
+   it("switches desktop packaging product names to nightly for nightly builds", () => {
+-    assert.equal(resolveDesktopProductName("0.0.17"), "T3 Code (Alpha)");
+-    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "T3 Code (Nightly)");
++    assert.equal(resolveDesktopProductName("0.0.17"), "T3 Code Personal (Alpha)");
++    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "T3 Code Personal (Nightly)");
+   });
+ 
+   it("switches desktop packaging icons to the nightly artwork for nightly versions", () => {
+@@ -658,7 +658,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
+         "**/*.map",
+       ]);
+       assert.deepStrictEqual(mac.dmg, {
+-        title: "T3 Code (Alpha) 1.2.3 Installer",
++        title: "T3 Code Personal (Alpha) 1.2.3 Installer",
+         background: "dmg/dmg-background-latest.png",
+         window: { width: 640, height: 432 },
+         contents: [
+@@ -1756,7 +1756,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
+     });
+ 
+     assert.deepStrictEqual(configuration, {
+-      appId: "com.t3tools.t3code",
++      appId: "com.t3tools.t3code.personal",
+       teamId: "ABC1234567",
+       rpDomains: ["example.clerk.accounts.dev"],
+       provisioningProfilePath: "/tmp/t3code.provisionprofile",
+@@ -1776,7 +1776,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
+       "clerk.example.com",
+       "example.clerk.accounts.dev",
+     ]);
+-    assert.include(entitlements, "<string>ABC1234567.com.t3tools.t3code</string>");
++    assert.include(entitlements, "<string>ABC1234567.com.t3tools.t3code.personal</string>");
+     assert.include(entitlements, "<string>webcredentials:clerk.example.com</string>");
+     assert.include(entitlements, "<string>webcredentials:example.clerk.accounts.dev</string>");
+     assert.include(entitlements, "<key>com.apple.security.cs.allow-jit</key>");
+@@ -1871,7 +1871,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
+       });
+ 
+       const mac = config.mac as Record<string, unknown>;
+-      assert.equal(config.appId, "com.t3tools.t3code");
++      assert.equal(config.appId, "com.t3tools.t3code.personal");
+       assert.equal(mac.entitlements, "/tmp/entitlements.mac.plist");
+       assert.equal(mac.provisioningProfile, "/tmp/t3code.provisionprofile");
+       assert.match(String(mac.sign), /[\\/]scripts[\\/]sign-macos\.ts$/);
+diff --git a/scripts/build-desktop-artifact.ts b/scripts/build-desktop-artifact.ts
+index cb47e40b..bc3f29aa 100644
+--- a/scripts/build-desktop-artifact.ts
++++ b/scripts/build-desktop-artifact.ts
+@@ -54,7 +54,7 @@ import { Command, Flag } from "effect/unstable/cli";
+ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+ 
+ const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
+-const DESKTOP_APP_ID = "com.t3tools.t3code";
++const DESKTOP_APP_ID = "com.t3tools.t3code.personal";
+ const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/u;
+ 
+ const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
+@@ -2614,7 +2614,7 @@ export function resolvePackageManagerUserAgent(packageManager: string): string {
+ 
+ export function resolveDesktopProductName(version: string): string {
+   return resolveDesktopUpdateChannel(version) === "nightly"
+-    ? "T3 Code (Nightly)"
++    ? "T3 Code Personal (Nightly)"
+     : (desktopPackageJson.productName ?? "T3 Code");
+ }
+ 
+@@ -2640,7 +2640,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
+   const buildConfig: Record<string, unknown> = {
+     appId: DESKTOP_APP_ID,
+     productName: resolveDesktopProductName(version),
+-    artifactName: "T3-Code-${version}-${arch}.${ext}",
++    artifactName: "T3-Code-Personal-${version}-${arch}.${ext}",
+     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
+     files: [
+       ...DESKTOP_FILE_EXCLUSIONS,
+@@ -2734,7 +2734,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
+   if (platform === "linux") {
+     buildConfig.linux = {
+       target: [target],
+-      executableName: "t3code",
++      executableName: "t3code-personal",
+       icon: "icons",
+       category: "Development",
+       // electron-builder turns these into MimeType=x-scheme-handler/<scheme>;
+@@ -2748,7 +2748,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
+       ],
+       desktop: {
+         entry: {
+-          StartupWMClass: "t3code",
++          StartupWMClass: "t3code-personal",
+         },
+       },
+     };
