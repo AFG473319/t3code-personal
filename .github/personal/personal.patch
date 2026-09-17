@@ -393,27 +393,24 @@ index 24495c4c..dd219183 100644
        return "A newer version is installed but the service is still running the previous one. Run `t3 service restart` to switch.";
    }
 diff --git a/apps/server/src/provider/Layers/OpenCodeProvider.test.ts b/apps/server/src/provider/Layers/OpenCodeProvider.test.ts
-index b50a51f6..106ea633 100644
+index b50a51f6..b9e2d2b9 100644
 --- a/apps/server/src/provider/Layers/OpenCodeProvider.test.ts
 +++ b/apps/server/src/provider/Layers/OpenCodeProvider.test.ts
-@@ -1,4 +1,5 @@
- import * as NodeAssert from "node:assert/strict";
-+import * as NodePath from "node:path";
- 
- import * as NodeServices from "@effect/platform-node/NodeServices";
- import { it } from "@effect/vitest";
-@@ -42,7 +43,9 @@ it.effect("reads Go limits with the instance's XDG credentials and preserves res
+@@ -42,7 +42,12 @@ it.effect("reads Go limits with the instance's XDG credentials and preserves res
          FileSystem.FileSystem,
          FileSystem.makeNoop({
            readFileString: (path) => {
 -            NodeAssert.equal(path, "/instance/data/opencode/auth.json");
-+            // Production joins with the platform path module, so the
-+            // expectation must be joined the same way to hold on Windows.
-+            NodeAssert.equal(path, NodePath.join("/instance/data", "opencode", "auth.json"));
++            // Normalized so the assertion holds on POSIX and Windows: the
++            // Node path module joins with the platform separator.
++            NodeAssert.equal(
++              path.replaceAll("\\", "/"),
++              "/instance/data/opencode/auth.json",
++            );
              return Effect.succeed(
                JSON.stringify({ "opencode-go": { type: "api", key: "instance-key" } }),
              );
-@@ -366,14 +369,14 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
+@@ -366,14 +371,14 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
        const probeFiber = yield* checkProvider(makeOpenCodeSettings()).pipe(Effect.forkChild);
  
        yield* Effect.yieldNow;
