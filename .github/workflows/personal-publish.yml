@@ -1,0 +1,74 @@
+name: personal-publish
+
+# Manual rescue tool: publish an already-built installer artifact from any
+# personal-build run as a fork release, without rebuilding. Used when the
+# build itself went green but the publish step flaked (e.g. a big-asset
+# upload hiccup), or to re-publish after deleting a release.
+#
+# It replaces the release wholesale (delete + recreate), so re-running it
+# for the same tag is always safe.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "personal-build run ID holding the installer artifact"
+        required: true
+      tag:
+        description: "Fork release tag (e.g. personal-v0.0.42)"
+        required: true
+      title:
+        description: "Release title"
+        required: true
+      notes:
+        description: "Release notes"
+        required: false
+        default: ""
+      prerelease:
+        description: "Mark as prerelease (nightly line)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: personal-build
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish fork release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: t3-code-personal-win-x64
+          path: release
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Publish fork release
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -la release
+          if [[ "${{ inputs.prerelease }}" == "true" ]]; then
+            pre="--prerelease"
+          else
+            pre=""
+          fi
+          gh release delete "${{ inputs.tag }}" --cleanup-tag --yes || true
+          # shellcheck disable=SC2086
+          gh release create "${{ inputs.tag }}" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "${{ inputs.title }}" \
+            --notes "${{ inputs.notes }}" \
+            $pre
+          gh release view "${{ inputs.tag }}" --json assets --jq '"Published assets:" + "\n" + ([.assets[] | .name] | join("\n"))'

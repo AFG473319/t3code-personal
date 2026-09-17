@@ -91,7 +91,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view "${{ steps.resolve.outputs.fork_tag }}" >/dev/null 2>&1; then
+          if gh release view "${{ steps.resolve.outputs.fork_tag }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Fork release ${{ steps.resolve.outputs.fork_tag }} already exists; skipping."
             echo "should_build=false" >> "$GITHUB_OUTPUT"
           else
@@ -208,8 +208,12 @@ jobs:
           else
             pre=""
           fi
+          # Delete-then-create: a previous partial publish (e.g. a flaked
+          # big-asset upload) must not block the completed build.
+          gh release delete "$tag" --cleanup-tag --yes || true
           # shellcheck disable=SC2086
           gh release create "$tag" release/* \
+            --repo "$GITHUB_REPOSITORY" \
             --title "T3 Code Personal ${{ steps.ver.outputs.version }}" \
             --notes "Personal build of pingdotgg/t3code@${{ needs.check.outputs.ref }}: identical except the 20s OpenCode version probe and the T3 Code Personal identity (side-by-side installable with official T3 Code). Install once; the app auto-updates from these fork releases afterwards." \
             $pre
