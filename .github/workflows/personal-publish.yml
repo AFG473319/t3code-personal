@@ -71,4 +71,4 @@ jobs:
             --title "${{ inputs.title }}" \
             --notes "${{ inputs.notes }}" \
             $pre
-          gh release view "${{ inputs.tag }}" --json assets --jq '"Published assets:" + "\n" + ([.assets[] | .name] | join("\n"))'
+          gh release view "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" --json assets --jq '"Published assets:" + "\n" + ([.assets[] | .name] | join("\n"))'
