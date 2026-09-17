@@ -2,15 +2,19 @@ name: personal-build
 
 # Personal T3 Code build: any upstream T3 Code version + the tiny personal
 # patch (20s OpenCode version probe, T3 Code Personal identity), packaged as
-# an unsigned Windows installer. Runs only when you ask it to
-# (Actions -> personal-build -> Run workflow). Free on public repos.
+# a Windows installer that updates itself from this fork's rolling releases.
 #
-# Everything else flows in normally from upstream: pick the stable line
-# (default), the nightly line, or pin an exact tag/SHA. The `-preview.`
-# version stamp means the app ships with no update feed, so it never fights
-# the official install over updates.
+# Everything else flows in normally from upstream:
+# - Daily schedule: builds the newest upstream stable when it changes.
+# - Manual dispatch: build stable, nightly, or pin an exact tag/SHA.
+#
+# Install one published build by hand; after that the app auto-updates from
+# the `personal-stable` (or `personal-nightly`) release on this fork. The
+# official T3 Code install is untouched: different app id, different feed.
 
 on:
+  schedule:
+    - cron: "0 6 * * *"
   workflow_dispatch:
     inputs:
       channel:
@@ -25,24 +29,38 @@ on:
         default: ""
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: personal-build
+  cancel-in-progress: false
 
 jobs:
-  win-x64:
-    name: Personal Windows x64
-    runs-on: windows-latest
-    timeout-minutes: 90
+  check:
+    name: Check for new upstream
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      ref: ${{ steps.resolve.outputs.ref }}
+      version: ${{ steps.resolve.outputs.version }}
+      roll_tag: ${{ steps.resolve.outputs.roll_tag }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Resolve upstream ref
-        id: upstream
+      - id: resolve
+        name: Resolve upstream ref
         shell: bash
         run: |
           set -euo pipefail
+          channel="${{ inputs.channel }}"
+          if [[ "${{ github.event_name }}" == "schedule" || -z "$channel" ]]; then
+            channel="stable"
+          fi
           if [[ -n "${{ inputs.ref }}" ]]; then
             ref="${{ inputs.ref }}"
-          elif [[ "${{ inputs.channel }}" == "nightly" ]]; then
+          elif [[ "$channel" == "nightly" ]]; then
             ref=$(gh api repos/pingdotgg/t3code/releases --paginate --jq '[.[] | select(.prerelease and (.tag_name | contains("-nightly.")))] | .[0].tag_name')
           else
             ref=$(gh api repos/pingdotgg/t3code/releases/latest --jq .tag_name)
@@ -51,19 +69,54 @@ jobs:
             echo "Could not resolve an upstream ref." >&2
             exit 1
           fi
-          echo "Upstream ref: $ref"
-          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          if [[ "$channel" == "nightly" ]]; then
+            roll_tag="personal-nightly"
+            prerelease="true"
+          else
+            roll_tag="personal-stable"
+            prerelease="false"
+          fi
           base="${ref#v}"
           base="${base%%-*}"
-          echo "version=$base-preview.$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "Upstream ref: $ref (channel: $channel, roll: $roll_tag)"
+          {
+            echo "ref=$ref"
+            echo "roll_tag=$roll_tag"
+            echo "prerelease=$prerelease"
+            echo "version=$base-personal.$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}"
+          } >> "$GITHUB_OUTPUT"
 
+      - id: check
+        name: Skip if already built
+        shell: bash
+        run: |
+          set -euo pipefail
+          body=$(gh release view "${{ steps.resolve.outputs.roll_tag }}" --json body --jq .body 2>/dev/null || true)
+          built=$(printf '%s\n' "$body" | grep -m1 '^Upstream: ' | cut -d' ' -f2 || true)
+          if [[ -n "$built" && "$built" == "${{ steps.resolve.outputs.ref }}" ]]; then
+            echo "Rolling release already built from ${{ steps.resolve.outputs.ref }}; skipping."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Building ${{ steps.resolve.outputs.ref }} (previous: ${built:-none})."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  win-x64:
+    name: Personal Windows x64
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
       - name: Checkout upstream and apply personal patch
         shell: bash
         run: |
           set -euo pipefail
           git init .
           git remote add upstream "${GITHUB_SERVER_URL}/pingdotgg/t3code.git"
-          git fetch --no-tags --depth=1 upstream "${{ steps.upstream.outputs.ref }}"
+          git fetch --no-tags --depth=1 upstream "${{ needs.check.outputs.ref }}"
           git sparse-checkout set --no-cone '/*' '!/.repos/'
           git checkout "$(git rev-parse 'FETCH_HEAD^{commit}')"
           curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/.github/personal/personal.patch" -o /tmp/personal.patch
@@ -119,13 +172,32 @@ jobs:
       - name: Build JS bundle
         run: vp run build:desktop
 
-      - name: Build unsigned Windows installer
+      - name: Build Windows installer
         shell: bash
-        run: node scripts/build-desktop-artifact.ts --platform win --target nsis --arch x64 --build-version "${{ steps.upstream.outputs.version }}" --verbose
+        run: node scripts/build-desktop-artifact.ts --platform win --target nsis --arch x64 --build-version "${{ needs.check.outputs.version }}" --verbose
 
-      - name: Upload installer
+      - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: t3-code-personal-win-x64
           path: release/*
           if-no-files-found: error
+
+      - name: Publish rolling release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ needs.check.outputs.roll_tag }}"
+          if [[ "${{ needs.check.outputs.prerelease }}" == "true" ]]; then
+            pre="--prerelease"
+            title="T3 Code Personal nightly ${{ needs.check.outputs.version }}"
+          else
+            pre=""
+            title="T3 Code Personal ${{ needs.check.outputs.version }}"
+          fi
+          gh release delete "$tag" --cleanup-tag --yes || true
+          # shellcheck disable=SC2086
+          gh release create "$tag" release/* \
+            --title "$title" \
+            --notes "Upstream: ${{ needs.check.outputs.ref }} plus the personal patch (20s OpenCode version probe, T3 Code Personal identity)." \
+            $pre
