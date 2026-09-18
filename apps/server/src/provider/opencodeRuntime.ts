@@ -78,8 +78,21 @@ export function resolveOpenCodeServerPassword(
     : input.environment.OPENCODE_SERVER_PASSWORD;
 }
 
+export function resolveOpenCodeServerTimeoutMs(
+  inputEnvironment: Readonly<Record<string, string | undefined>> | undefined,
+  inheritedEnvironment: Readonly<Record<string, string | undefined>> = process.env,
+): number {
+  const raw =
+    inputEnvironment?.OPENCODE_SERVER_TIMEOUT_MS ?? inheritedEnvironment.OPENCODE_SERVER_TIMEOUT_MS;
+  const parsed = raw === undefined ? Number.NaN : Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_OPENCODE_SERVER_TIMEOUT_MS;
+}
+
 const OPENCODE_SERVER_READY_PREFIX = "opencode server listening";
-const DEFAULT_OPENCODE_SERVER_TIMEOUT_MS = 30_000;
+// Cold starts on slow hardware (Node boot + provider/config scan) can take
+// well over 30s, so the default allows two minutes; true hangs are rarer than
+// slow machines. Users can raise it further with OPENCODE_SERVER_TIMEOUT_MS.
+export const DEFAULT_OPENCODE_SERVER_TIMEOUT_MS = 120_000;
 const DEFAULT_HOSTNAME = "127.0.0.1";
 const OPENCODE_SERVER_STARTUP_MAX_OUTPUT_CHARS = 64 * 1024;
 const OPENCODE_SKILL_DISCOVERY_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
@@ -684,7 +697,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
               }),
           ),
         ));
-      const timeoutMs = input.timeoutMs ?? DEFAULT_OPENCODE_SERVER_TIMEOUT_MS;
+      const timeoutMs = input.timeoutMs ?? resolveOpenCodeServerTimeoutMs(input.environment);
       const args = ["serve", `--hostname=${hostname}`, `--port=${port}`];
       const spawnCommand = yield* resolveCommand(input.binaryPath, args, input.environment);
       const serverPassword = resolveOpenCodeServerPassword({
@@ -830,7 +843,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
       if (Option.isNone(readyOption)) {
         return yield* new OpenCodeRuntimeError({
           operation: "startOpenCodeServerProcess",
-          detail: `Timed out waiting for OpenCode server start after ${timeoutMs}ms.`,
+          detail: `Timed out waiting for OpenCode server start after ${timeoutMs}ms. Set OPENCODE_SERVER_TIMEOUT_MS to allow more startup time.`,
         });
       }
 
