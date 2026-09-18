@@ -491,18 +491,18 @@ index 24495c4c2..dd219183f 100644
        return "A newer version is installed but the service is still running the previous one. Run `t3 service restart` to switch.";
    }
 diff --git a/apps/server/src/os-jank.test.ts b/apps/server/src/os-jank.test.ts
-index a157efb66..488382ace 100644
+index a157efb66..e8b81d33b 100644
 --- a/apps/server/src/os-jank.test.ts
 +++ b/apps/server/src/os-jank.test.ts
-@@ -1,7 +1,19 @@
+@@ -1,7 +1,18 @@
  import * as NodeOS from "node:os";
-+import * as NodePath from "node:path";
- import { assert, it } from "vite-plus/test";
-+import { afterEach, vi } from "vite-plus/test";
+-import { assert, it } from "vite-plus/test";
++import { afterEach, assert, it, vi } from "vite-plus/test";
  
 -import { hydratePosixHome } from "./os-jank.ts";
 +import * as NodeServices from "@effect/platform-node/NodeServices";
 +import * as Effect from "effect/Effect";
++import * as Path from "effect/Path";
 +
 +import { hydratePosixHome, resolveBaseDir } from "./os-jank.ts";
 +
@@ -515,15 +515,16 @@ index a157efb66..488382ace 100644
  
  it("hydrates HOME for minimal service environments from the user account", () => {
    const env: NodeJS.ProcessEnv = {};
-@@ -38,3 +50,12 @@ it("preserves an explicitly configured HOME", () => {
+@@ -38,3 +49,13 @@ it("preserves an explicitly configured HOME", () => {
  
    assert.equal(env.HOME, "/custom/home");
  });
 +
 +it("defaults the server home to the personal data directory", () =>
 +  Effect.gen(function* () {
-+    vi.mocked(NodeOS.homedir).mockReturnValue(NodePath.join("home-root", "personal"));
-+    const expected = NodePath.join("home-root", "personal", ".t3-personal");
++    const path = yield* Path.Path;
++    vi.mocked(NodeOS.homedir).mockReturnValue("/home/personal");
++    const expected = path.join("/home/personal", ".t3-personal");
 +    assert.equal(yield* resolveBaseDir(undefined), expected);
 +    assert.equal(yield* resolveBaseDir(""), expected);
 +    assert.equal(yield* resolveBaseDir("   "), expected);
