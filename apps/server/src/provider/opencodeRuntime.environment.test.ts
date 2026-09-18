@@ -16,11 +16,13 @@ import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  DEFAULT_OPENCODE_SERVER_TIMEOUT_MS,
   OpenCodeRuntime,
   OpenCodeRuntimeError,
   OpenCodeRuntimeLive,
   resolveOpenCodeConfigContent,
   resolveOpenCodeServerPassword,
+  resolveOpenCodeServerTimeoutMs,
   verifyOpenCodeServerVersion,
 } from "./opencodeRuntime.ts";
 
@@ -80,6 +82,31 @@ describe("resolveOpenCodeServerPassword", () => {
         { OPENCODE_SERVER_PASSWORD: "inherited-secret" },
       ),
     ).toBeUndefined();
+  });
+});
+
+describe("resolveOpenCodeServerTimeoutMs", () => {
+  it("uses the caller environment timeout when provided", () => {
+    expect(resolveOpenCodeServerTimeoutMs({ OPENCODE_SERVER_TIMEOUT_MS: "45000" }, {})).toBe(45000);
+  });
+
+  it("falls back to the inherited environment", () => {
+    expect(
+      resolveOpenCodeServerTimeoutMs(undefined, { OPENCODE_SERVER_TIMEOUT_MS: "180000" }),
+    ).toBe(180000);
+  });
+
+  it("falls back to the default when unset", () => {
+    expect(resolveOpenCodeServerTimeoutMs(undefined, {})).toBe(DEFAULT_OPENCODE_SERVER_TIMEOUT_MS);
+  });
+
+  it("falls back to the default when the override is invalid", () => {
+    expect(
+      resolveOpenCodeServerTimeoutMs({ OPENCODE_SERVER_TIMEOUT_MS: "not-a-number" }, {}),
+    ).toBe(DEFAULT_OPENCODE_SERVER_TIMEOUT_MS);
+    expect(resolveOpenCodeServerTimeoutMs({ OPENCODE_SERVER_TIMEOUT_MS: "-5000" }, {})).toBe(
+      DEFAULT_OPENCODE_SERVER_TIMEOUT_MS,
+    );
   });
 });
 
