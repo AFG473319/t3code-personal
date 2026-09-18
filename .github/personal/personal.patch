@@ -1,5 +1,5 @@
 diff --git a/apps/desktop/package.json b/apps/desktop/package.json
-index 6e21f871..d2cfe955 100644
+index 6e21f8715..d2cfe9551 100644
 --- a/apps/desktop/package.json
 +++ b/apps/desktop/package.json
 @@ -40,5 +40,5 @@
@@ -10,7 +10,7 @@ index 6e21f871..d2cfe955 100644
 +  "productName": "T3 Code Personal (Alpha)"
  }
 diff --git a/apps/desktop/scripts/electron-launcher.mjs b/apps/desktop/scripts/electron-launcher.mjs
-index 48f66ab7..b4b8c69b 100644
+index 48f66ab76..b4b8c69bb 100644
 --- a/apps/desktop/scripts/electron-launcher.mjs
 +++ b/apps/desktop/scripts/electron-launcher.mjs
 @@ -15,10 +15,10 @@ const repoRoot = NodePath.resolve(desktopDir, "..", "..");
@@ -27,7 +27,7 @@ index 48f66ab7..b4b8c69b 100644
  const LAUNCHER_VERSION = 19;
  const developmentMacIconPngPath = NodePath.join(
 diff --git a/apps/desktop/src/app/DesktopAppIdentity.test.ts b/apps/desktop/src/app/DesktopAppIdentity.test.ts
-index 71bcf5f7..9da87588 100644
+index 71bcf5f7a..9da875887 100644
 --- a/apps/desktop/src/app/DesktopAppIdentity.test.ts
 +++ b/apps/desktop/src/app/DesktopAppIdentity.test.ts
 @@ -131,7 +131,7 @@ const withIdentity = <A, E, R>(
@@ -68,7 +68,7 @@ index 71bcf5f7..9da87588 100644
          assert.equal(calls.setAboutPanelOptions[0]?.version, "0123456789ab");
          // Packaged: the bundle's own icon stands, so a custom one the user
 diff --git a/apps/desktop/src/app/DesktopClerk.test.ts b/apps/desktop/src/app/DesktopClerk.test.ts
-index 1641149e..2bb31e64 100644
+index 1641149e9..2bb31e645 100644
 --- a/apps/desktop/src/app/DesktopClerk.test.ts
 +++ b/apps/desktop/src/app/DesktopClerk.test.ts
 @@ -34,8 +34,8 @@ const makeDesktopClerkLayer = (isDevelopment = true, events: string[] = []) => {
@@ -83,7 +83,7 @@ index 1641149e..2bb31e64 100644
    } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]);
  
 diff --git a/apps/desktop/src/app/DesktopClerk.ts b/apps/desktop/src/app/DesktopClerk.ts
-index 072a1871..05b7d0b3 100644
+index 072a1871d..05b7d0b3e 100644
 --- a/apps/desktop/src/app/DesktopClerk.ts
 +++ b/apps/desktop/src/app/DesktopClerk.ts
 @@ -92,7 +92,7 @@ export const make = Effect.gen(function* () {
@@ -95,8 +95,39 @@ index 072a1871..05b7d0b3 100644
    // detection in resolveUserDataPath match on fresh installs.
    const userDataPath = yield* DesktopAppIdentity.resolveUserDataPath;
    yield* electronApp.setPath("userData", userDataPath);
+diff --git a/apps/desktop/src/app/DesktopEarlyElectronStartup.test.ts b/apps/desktop/src/app/DesktopEarlyElectronStartup.test.ts
+index 70441702e..006eaf22a 100644
+--- a/apps/desktop/src/app/DesktopEarlyElectronStartup.test.ts
++++ b/apps/desktop/src/app/DesktopEarlyElectronStartup.test.ts
+@@ -88,7 +88,7 @@ describe("DesktopEarlyElectronStartup", () => {
+     });
+   });
+ 
+-  it("keeps implicit development state under ~/.t3/dev when T3CODE_HOME is unset", () => {
++  it("keeps implicit development state under ~/.t3-personal/dev when T3CODE_HOME is unset", () => {
+     const preference = resolveEarlyLinuxPasswordStorePreference({
+       env: {
+         VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
+@@ -96,7 +96,7 @@ describe("DesktopEarlyElectronStartup", () => {
+       homeDirectory: "/home/user",
+       joinPath,
+       readFileString: (path) => {
+-        assert.equal(path, "/home/user/.t3/dev/desktop-settings.json");
++        assert.equal(path, "/home/user/.t3-personal/dev/desktop-settings.json");
+         return JSON.stringify({ linuxPasswordStore: "kwallet" });
+       },
+     });
+@@ -113,7 +113,7 @@ describe("DesktopEarlyElectronStartup", () => {
+       homeDirectory: "/home/user",
+       joinPath,
+       readFileString: (path) => {
+-        assert.equal(path, "/home/user/.t3/dev/desktop-settings.json");
++        assert.equal(path, "/home/user/.t3-personal/dev/desktop-settings.json");
+         return JSON.stringify({ linuxPasswordStore: "gnome-libsecret" });
+       },
+     });
 diff --git a/apps/desktop/src/app/DesktopEarlyElectronStartup.ts b/apps/desktop/src/app/DesktopEarlyElectronStartup.ts
-index 95922bdf..957434f9 100644
+index 95922bdfd..957434f94 100644
 --- a/apps/desktop/src/app/DesktopEarlyElectronStartup.ts
 +++ b/apps/desktop/src/app/DesktopEarlyElectronStartup.ts
 @@ -32,7 +32,7 @@ export interface EarlyLinuxElectronOptions {
@@ -118,7 +149,7 @@ index 95922bdf..957434f9 100644
      passwordStore: resolveLinuxPasswordStoreSwitch({
        preference,
 diff --git a/apps/desktop/src/app/DesktopEnvironment.test.ts b/apps/desktop/src/app/DesktopEnvironment.test.ts
-index 0e5fbecd..b894ef3e 100644
+index 0e5fbecd0..3fb69f13b 100644
 --- a/apps/desktop/src/app/DesktopEnvironment.test.ts
 +++ b/apps/desktop/src/app/DesktopEnvironment.test.ts
 @@ -147,7 +147,7 @@ describe("DesktopEnvironment", () => {
@@ -130,8 +161,19 @@ index 0e5fbecd..b894ef3e 100644
      }),
    );
  
+@@ -159,8 +159,8 @@ describe("DesktopEnvironment", () => {
+       );
+       const production = yield* makeEnvironment();
+ 
+-      assert.equal(development.stateDir, "/Users/alice/.t3/dev");
+-      assert.equal(production.stateDir, "/Users/alice/.t3/userdata");
++      assert.equal(development.stateDir, "/Users/alice/.t3-personal/dev");
++      assert.equal(production.stateDir, "/Users/alice/.t3-personal/userdata");
+     }),
+   );
+ 
 diff --git a/apps/desktop/src/app/DesktopEnvironment.ts b/apps/desktop/src/app/DesktopEnvironment.ts
-index e7a489d5..7ad9f8f6 100644
+index e7a489d5e..7ad9f8f67 100644
 --- a/apps/desktop/src/app/DesktopEnvironment.ts
 +++ b/apps/desktop/src/app/DesktopEnvironment.ts
 @@ -91,7 +91,7 @@ export class DesktopEnvironment extends Context.Service<
@@ -168,7 +210,7 @@ index e7a489d5..7ad9f8f6 100644
      appImagePath: config.appImagePath,
      userDataDirName,
 diff --git a/apps/desktop/src/app/DesktopPreReadyPlatform.test.ts b/apps/desktop/src/app/DesktopPreReadyPlatform.test.ts
-index 9ddaf40c..de694763 100644
+index 9ddaf40ca..de6947637 100644
 --- a/apps/desktop/src/app/DesktopPreReadyPlatform.test.ts
 +++ b/apps/desktop/src/app/DesktopPreReadyPlatform.test.ts
 @@ -89,7 +89,7 @@ describe("DesktopPreReadyPlatform", () => {
@@ -192,8 +234,64 @@ index 9ddaf40c..de694763 100644
              assert.include(identity.desktopEntry ?? "", "MimeType=x-scheme-handler/t3code;");
            }),
          ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
+diff --git a/apps/desktop/src/app/DesktopStatePaths.ts b/apps/desktop/src/app/DesktopStatePaths.ts
+index 006dd9709..ecbc629e2 100644
+--- a/apps/desktop/src/app/DesktopStatePaths.ts
++++ b/apps/desktop/src/app/DesktopStatePaths.ts
+@@ -15,8 +15,10 @@ export function resolveDesktopBaseDir(input: {
+   readonly joinPath: JoinPath;
+   readonly t3Home: Option.Option<string>;
+ }): string {
++  // Personal builds keep their own data directory so they never share the
++  // database with an official T3 Code install on the same machine.
+   return Option.getOrElse(normalizeConfiguredBaseDir(input.t3Home), () =>
+-    input.joinPath(input.homeDirectory, ".t3"),
++    input.joinPath(input.homeDirectory, ".t3-personal"),
+   );
+ }
+ 
+diff --git a/apps/server/src/cli/app.test.ts b/apps/server/src/cli/app.test.ts
+index 0dddca4b1..88f44301d 100644
+--- a/apps/server/src/cli/app.test.ts
++++ b/apps/server/src/cli/app.test.ts
+@@ -211,7 +211,7 @@ describe("t3 app", () => {
+     withTempDirectory("t3-app-preferred-test-", (root) =>
+       Effect.gen(function* () {
+         vi.mocked(NodeOS.homedir).mockReturnValue(root);
+-        const baseDir = NodePath.join(root, ".t3");
++        const baseDir = NodePath.join(root, ".t3-personal");
+         const desktop = yield* fakeDesktop({ baseDir });
+         const development = yield* fakeDesktop({ baseDir, stateSubdirectory: "dev" });
+ 
+@@ -227,7 +227,7 @@ describe("t3 app", () => {
+     withTempDirectory("t3-app-dev-test-", (root) =>
+       Effect.gen(function* () {
+         vi.mocked(NodeOS.homedir).mockReturnValue(root);
+-        const baseDir = NodePath.join(root, ".t3");
++        const baseDir = NodePath.join(root, ".t3-personal");
+         const development = yield* fakeDesktop({ baseDir, stateSubdirectory: "dev" });
+ 
+         yield* runCli(["app"]);
+@@ -243,7 +243,7 @@ describe("t3 app", () => {
+     withTempDirectory("t3-app-explicit-test-", (root) =>
+       Effect.gen(function* () {
+         vi.mocked(NodeOS.homedir).mockReturnValue(root);
+-        const baseDir = NodePath.join(root, ".t3");
++        const baseDir = NodePath.join(root, ".t3-personal");
+         const development = yield* fakeDesktop({ baseDir, stateSubdirectory: "dev" });
+ 
+         const flagError = yield* runCli(["app", "--base-dir", baseDir]).pipe(Effect.flip);
+@@ -261,7 +261,7 @@ describe("t3 app", () => {
+       withTempDirectory("t3-app-response-test-", (root) =>
+         Effect.gen(function* () {
+           vi.mocked(NodeOS.homedir).mockReturnValue(root);
+-          const baseDir = NodePath.join(root, ".t3");
++          const baseDir = NodePath.join(root, ".t3-personal");
+           const desktop = yield* fakeDesktop({
+             baseDir,
+             reply: (request) =>
 diff --git a/apps/server/src/cloud/bootService.test.ts b/apps/server/src/cloud/bootService.test.ts
-index 25609853..241b16b0 100644
+index 25609853d..241b16b0a 100644
 --- a/apps/server/src/cloud/bootService.test.ts
 +++ b/apps/server/src/cloud/bootService.test.ts
 @@ -29,7 +29,7 @@ const linuxPlan = {
@@ -365,7 +463,7 @@ index 25609853..241b16b0 100644
          ]);
        }
 diff --git a/apps/server/src/cloud/bootService.ts b/apps/server/src/cloud/bootService.ts
-index 24495c4c..dd219183 100644
+index 24495c4c2..dd219183f 100644
 --- a/apps/server/src/cloud/bootService.ts
 +++ b/apps/server/src/cloud/bootService.ts
 @@ -36,11 +36,11 @@ import {
@@ -392,8 +490,61 @@ index 24495c4c..dd219183 100644
      case "restart-pending":
        return "A newer version is installed but the service is still running the previous one. Run `t3 service restart` to switch.";
    }
+diff --git a/apps/server/src/os-jank.test.ts b/apps/server/src/os-jank.test.ts
+index a157efb66..488382ace 100644
+--- a/apps/server/src/os-jank.test.ts
++++ b/apps/server/src/os-jank.test.ts
+@@ -1,7 +1,19 @@
+ import * as NodeOS from "node:os";
++import * as NodePath from "node:path";
+ import { assert, it } from "vite-plus/test";
++import { afterEach, vi } from "vite-plus/test";
+ 
+-import { hydratePosixHome } from "./os-jank.ts";
++import * as NodeServices from "@effect/platform-node/NodeServices";
++import * as Effect from "effect/Effect";
++
++import { hydratePosixHome, resolveBaseDir } from "./os-jank.ts";
++
++vi.mock("node:os", async (importOriginal) => {
++  const os = await importOriginal<typeof import("node:os")>();
++  return { ...os, homedir: vi.fn(os.homedir) };
++});
++
++afterEach(() => vi.mocked(NodeOS.homedir).mockReset());
+ 
+ it("hydrates HOME for minimal service environments from the user account", () => {
+   const env: NodeJS.ProcessEnv = {};
+@@ -38,3 +50,12 @@ it("preserves an explicitly configured HOME", () => {
+ 
+   assert.equal(env.HOME, "/custom/home");
+ });
++
++it("defaults the server home to the personal data directory", () =>
++  Effect.gen(function* () {
++    vi.mocked(NodeOS.homedir).mockReturnValue(NodePath.join("home-root", "personal"));
++    const expected = NodePath.join("home-root", "personal", ".t3-personal");
++    assert.equal(yield* resolveBaseDir(undefined), expected);
++    assert.equal(yield* resolveBaseDir(""), expected);
++    assert.equal(yield* resolveBaseDir("   "), expected);
++  }).pipe(Effect.provide(NodeServices.layer), Effect.runPromise));
+diff --git a/apps/server/src/os-jank.ts b/apps/server/src/os-jank.ts
+index 18ddbc66c..49bf05dce 100644
+--- a/apps/server/src/os-jank.ts
++++ b/apps/server/src/os-jank.ts
+@@ -105,7 +105,9 @@ export const expandHomePath = Effect.fn(function* (input: string) {
+ export const resolveBaseDir = Effect.fn(function* (raw: string | undefined) {
+   const { join, resolve } = yield* Path.Path;
+   if (!raw || raw.trim().length === 0) {
+-    return join(NodeOS.homedir(), ".t3");
++    // Personal builds keep their own data directory so they never share the
++    // database with an official T3 Code install on the same machine.
++    return join(NodeOS.homedir(), ".t3-personal");
+   }
+   return resolve(yield* expandHomePath(raw.trim()));
+ });
 diff --git a/apps/server/src/provider/Layers/OpenCodeProvider.test.ts b/apps/server/src/provider/Layers/OpenCodeProvider.test.ts
-index b50a51f6..b9e2d2b9 100644
+index b50a51f6c..b9e2d2b9d 100644
 --- a/apps/server/src/provider/Layers/OpenCodeProvider.test.ts
 +++ b/apps/server/src/provider/Layers/OpenCodeProvider.test.ts
 @@ -42,7 +42,12 @@ it.effect("reads Go limits with the instance's XDG credentials and preserves res
@@ -428,7 +579,7 @@ index b50a51f6..b9e2d2b9 100644
      }).pipe(Effect.provide(TestClock.layer())),
    );
 diff --git a/apps/server/src/provider/Layers/OpenCodeProvider.ts b/apps/server/src/provider/Layers/OpenCodeProvider.ts
-index 0495f8b3..5620f22d 100644
+index 0495f8b30..5620f22d0 100644
 --- a/apps/server/src/provider/Layers/OpenCodeProvider.ts
 +++ b/apps/server/src/provider/Layers/OpenCodeProvider.ts
 @@ -33,7 +33,7 @@ const OPENCODE_PRESENTATION = {
@@ -441,7 +592,7 @@ index 0495f8b3..5620f22d 100644
  class OpenCodeProbeError extends Data.TaggedError("OpenCodeProbeError")<{
    readonly cause?: unknown;
 diff --git a/scripts/build-desktop-artifact.test.ts b/scripts/build-desktop-artifact.test.ts
-index 08d7cf10..a02f4e29 100644
+index 08d7cf10e..a02f4e290 100644
 --- a/scripts/build-desktop-artifact.test.ts
 +++ b/scripts/build-desktop-artifact.test.ts
 @@ -254,8 +254,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
@@ -492,7 +643,7 @@ index 08d7cf10..a02f4e29 100644
        assert.equal(mac.provisioningProfile, "/tmp/t3code.provisionprofile");
        assert.match(String(mac.sign), /[\\/]scripts[\\/]sign-macos\.ts$/);
 diff --git a/scripts/build-desktop-artifact.ts b/scripts/build-desktop-artifact.ts
-index cb47e40b..bc3f29aa 100644
+index cb47e40b8..4bdf8765b 100644
 --- a/scripts/build-desktop-artifact.ts
 +++ b/scripts/build-desktop-artifact.ts
 @@ -54,7 +54,7 @@ import { Command, Flag } from "effect/unstable/cli";
@@ -540,3 +691,55 @@ index cb47e40b..bc3f29aa 100644
          },
        },
      };
+@@ -3644,7 +3644,10 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
+       ? path.join(stageAppDir, WINDOWS_SERVER_RESOURCE_SOURCE_DIR, WINDOWS_SERVER_ASAR_RESOURCE)
+       : undefined;
+   const stagePackageJson: StagePackageJson = {
+-    name: "t3code",
++    // The staged package name drives the Windows one-click install folder
++    // (Programs\<name>) and the updater cache directory, so Personal gets its
++    // own install slot instead of overwriting an official T3 Code install.
++    name: "t3code-personal",
+     version: appVersion,
+     buildVersion: appVersion,
+     t3codeCommitHash: commitHash,
+diff --git a/scripts/dev-runner.test.ts b/scripts/dev-runner.test.ts
+index 5a270386a..d774ae03b 100644
+--- a/scripts/dev-runner.test.ts
++++ b/scripts/dev-runner.test.ts
+@@ -22,6 +22,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+ import {
+   checkPortAvailabilityOnHosts,
+   createDevRunnerEnv,
++  DEFAULT_T3_HOME,
+   devPortProbeHosts,
+   findFirstAvailableOffset,
+   getDevRunnerModeArgs,
+@@ -1348,6 +1349,13 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
+           assert.equal(home, undefined);
+         }),
+       );
++
++      it.effect("keeps the fallback dev home off the official T3 Code home", () =>
++        Effect.gen(function* () {
++          const path = yield* Path.Path;
++          assert.equal(yield* DEFAULT_T3_HOME, path.join(NodeOS.homedir(), ".t3-personal"));
++        }),
++      );
+     });
+   });
+ });
+diff --git a/scripts/dev-runner.ts b/scripts/dev-runner.ts
+index 5b16e9f90..822722291 100644
+--- a/scripts/dev-runner.ts
++++ b/scripts/dev-runner.ts
+@@ -68,7 +68,8 @@ export function isProxiableBindHost(host: string): boolean {
+ }
+ 
+ export const DEFAULT_T3_HOME = Effect.map(Effect.service(Path.Path), (path) =>
+-  path.join(NodeOS.homedir(), ".t3"),
++  // Personal dev runs keep their state off the official T3 Code home.
++  path.join(NodeOS.homedir(), ".t3-personal"),
+ );
+ 
+ const MODE_ARGS = {

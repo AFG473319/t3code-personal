@@ -1,16 +1,26 @@
 name: personal-build
 
 # Personal T3 Code build: any upstream T3 Code version + the tiny personal
-# patch (20s OpenCode version probe, T3 Code Personal identity), packaged as
-# a Windows installer that updates itself from this fork's releases.
+# patch (20s OpenCode version probe, T3 Code Personal identity, and a fully
+# separate data directory/install slot), packaged as a Windows installer that
+# updates itself from this fork's releases.
+#
+# The patch keeps Personal side-by-side safe with official T3 Code: own
+# ~/.t3-personal home (fresh start — re-add project folders after switching),
+# own Programs\t3code-personal install folder, own Electron userData, own boot
+# service name, own app id, and a fork update feed. Deliberately shared (same
+# as upstream's stable/nightly channels share): the t3code:// URL scheme and
+# Clerk/relay auth.
 #
 # Everything else flows in normally from upstream:
 # - Daily schedule: builds the newest upstream stable when it changes.
 # - Manual dispatch: build stable, nightly, or pin an exact tag/SHA.
 #
-# Each upstream version gets its own fork release, `personal-<upstream-tag>`
-# (e.g. `personal-v0.0.42`), with the installer attached — just like the
-# original project. Install one published build by hand; after that the app
+# Each upstream version gets its own fork release — `personal-<upstream-tag>`
+# for stable (e.g. `personal-v0.0.42`) and `<upstream-tag>.personal` for
+# nightly (e.g. `v0.0.43-nightly.20260917.1866.personal`; the nightly tag must
+# stay valid semver or electron-updater ignores the release) — with the
+# installer attached, just like the original project. Install one published build by hand; after that the app
 # auto-updates from these releases. The official T3 Code install is
 # untouched: different app id, different feed.
 #
@@ -78,6 +88,12 @@ jobs:
           fork_tag="personal-$ref"
           if [[ "$ref" == *"-nightly."* ]]; then
             prerelease="true"
+            # Nightly fork tags must stay valid semver with a nightly
+            # prerelease: electron-updater skips every feed entry whose tag
+            # is not semver, so a personal- prefix here silently breaks
+            # nightly auto-update (every check fails). Stable tags only need
+            # a string match, so they keep the personal- prefix.
+            fork_tag="$ref.personal"
           else
             prerelease="false"
           fi
@@ -123,6 +139,31 @@ jobs:
           git apply --check /tmp/personal.patch
           git apply --stat /tmp/personal.patch
           git apply /tmp/personal.patch
+
+      - name: Verify personal identity markers
+        # The patch must keep Personal fully separate from official T3 Code.
+        # Fail fast if an upstream refactor moved a renamed literal so a hunk
+        # applied with fuzz in the wrong place (or stopped applying at all).
+        shell: bash
+        run: |
+          set -euo pipefail
+          check() {
+            if ! grep -Rq -- "$1" $2; then
+              echo "MISSING personal marker: $1 (in $2)" >&2
+              exit 1
+            fi
+            echo "ok: $1"
+          }
+          check '\.t3-personal' apps/desktop/src/app/DesktopStatePaths.ts
+          check '\.t3-personal' apps/server/src/os-jank.ts
+          check '\.t3-personal' apps/server/src/cli/app.test.ts
+          check '\.t3-personal' scripts/dev-runner.ts
+          check 'name: "t3code-personal"' scripts/build-desktop-artifact.ts
+          check 'com.t3tools.t3code.personal' apps/desktop/src/app/DesktopEnvironment.ts
+          check 't3code-personal' apps/desktop/src/app/DesktopEnvironment.ts
+          check 'T3 Code Personal (Alpha)' apps/desktop/package.json
+          check 'BOOT_SERVICE_NAME = "t3code-personal"' apps/server/src/cloud/bootService.ts
+          check 'OPENCODE_VERSION_PROBE_TIMEOUT = "20 seconds"' apps/server/src/provider/Layers/OpenCodeProvider.ts
 
       - name: Resolve build version
         id: ver
@@ -189,11 +230,15 @@ jobs:
       # t3code-personal service, pass. Upstream CI runs this suite on Linux.
       - name: Test patched server suite
         working-directory: apps/server
-        run: vp test run src/provider/Layers/OpenCodeProvider.test.ts
+        run: vp test run src/provider/Layers/OpenCodeProvider.test.ts src/os-jank.test.ts src/cli/app.test.ts
 
       - name: Test patched desktop suites
         working-directory: apps/desktop
         run: vp test run src/app/DesktopEnvironment.test.ts src/app/DesktopAppIdentity.test.ts src/app/DesktopClerk.test.ts src/app/DesktopPreReadyPlatform.test.ts src/app/DesktopEarlyElectronStartup.test.ts
+
+      - name: Test personal dev-runner default home
+        working-directory: scripts
+        run: vp test run dev-runner.test.ts -t "fallback dev home"
 
       - name: Build JS bundle
         run: vp run build:desktop
@@ -226,5 +271,5 @@ jobs:
           gh release create "$tag" release/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "T3 Code Personal ${{ steps.ver.outputs.version }}" \
-            --notes "Personal build of pingdotgg/t3code@${{ needs.check.outputs.ref }}: identical except the 20s OpenCode version probe and the T3 Code Personal identity (side-by-side installable with official T3 Code). Install once; the app auto-updates from these fork releases afterwards." \
+            --notes "Personal build of pingdotgg/t3code@${{ needs.check.outputs.ref }}: upstream-identical except the 20s OpenCode version probe and the T3 Code Personal identity. Installs side-by-side with official T3 Code (own Programs/t3code-personal folder, own update feed) and keeps its own ~/.t3-personal data directory, so the two apps never share a database. First run starts fresh: re-add your project folders (thread history from the shared era stays in the official app). Install once; the app auto-updates from these fork releases afterwards." \
             $pre

@@ -15,7 +15,7 @@ on:
         description: "personal-build run ID holding the installer artifact"
         required: true
       tag:
-        description: "Fork release tag (e.g. personal-v0.0.42)"
+        description: "Fork release tag (e.g. personal-v0.0.42, or v0.0.43-nightly.20260917.1866.personal for nightly)"
         required: true
       title:
         description: "Release title"
