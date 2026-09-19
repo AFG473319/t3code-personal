@@ -547,7 +547,7 @@ index 18ddbc66c..49bf05dce 100644
 diff --git a/apps/server/src/provider/Layers/OpenCodeProvider.test.ts b/apps/server/src/provider/Layers/OpenCodeProvider.test.ts
 --- a/apps/server/src/provider/Layers/OpenCodeProvider.test.ts
 +++ b/apps/server/src/provider/Layers/OpenCodeProvider.test.ts
-@@ -230,7 +230,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
+@@ -233,14 +233,14 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
        const probeFiber = yield* checkProvider(makeOpenCodeSettings()).pipe(Effect.forkChild);
  
        yield* Effect.yieldNow;
@@ -556,6 +556,14 @@ diff --git a/apps/server/src/provider/Layers/OpenCodeProvider.test.ts b/apps/ser
        const snapshot = yield* Fiber.join(probeFiber);
  
        NodeAssert.equal(snapshot.status, "error");
+       NodeAssert.equal(snapshot.installed, true);
+       NodeAssert.equal(
+         snapshot.message,
+-        "Failed to execute OpenCode CLI health check: OpenCode CLI version probe timed out after 4 seconds.",
++        "Failed to execute OpenCode CLI health check: OpenCode CLI version probe timed out after 20 seconds.",
+       );
+     }).pipe(Effect.provide(TestClock.layer())),
+   );
 diff --git a/apps/server/src/provider/Layers/OpenCodeProvider.ts b/apps/server/src/provider/Layers/OpenCodeProvider.ts
 index 0495f8b30..5620f22d0 100644
 --- a/apps/server/src/provider/Layers/OpenCodeProvider.ts
