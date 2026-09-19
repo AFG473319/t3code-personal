@@ -1,9 +1,10 @@
 name: personal-build
 
 # Personal T3 Code build: any upstream T3 Code version + the tiny personal
-# patch (20s OpenCode version probe, T3 Code Personal identity, and a fully
-# separate data directory/install slot), packaged as a Windows installer that
-# updates itself from this fork's releases.
+# patch (20s OpenCode version probe, 120s OpenCode server startup timeout,
+# T3 Code Personal identity, and a fully separate data directory/install
+# slot), packaged as a Windows installer that updates itself from this
+# fork's releases.
 #
 # The patch keeps Personal side-by-side safe with official T3 Code: own
 # ~/.t3-personal home (fresh start — re-add project folders after switching),
@@ -139,6 +140,14 @@ jobs:
           git apply --check /tmp/personal.patch
           git apply --stat /tmp/personal.patch
           git apply /tmp/personal.patch
+          # The Go-limits usage test and its Windows path-normalization hunk
+          # only exist on the nightly line (post-0.0.42 upstream); keep that
+          # hunk out of personal.patch so the older stable ref still applies.
+          if [[ "${{ needs.check.outputs.prerelease }}" == "true" ]]; then
+            curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/.github/personal/personal-nightly.patch" -o /tmp/personal-nightly.patch
+            git apply --check /tmp/personal-nightly.patch
+            git apply /tmp/personal-nightly.patch
+          fi
 
       - name: Verify personal identity markers
         # The patch must keep Personal fully separate from official T3 Code.
@@ -164,6 +173,7 @@ jobs:
           check 'T3 Code Personal (Alpha)' apps/desktop/package.json
           check 'BOOT_SERVICE_NAME = "t3code-personal"' apps/server/src/cloud/bootService.ts
           check 'OPENCODE_VERSION_PROBE_TIMEOUT = "20 seconds"' apps/server/src/provider/Layers/OpenCodeProvider.ts
+          check 'DEFAULT_OPENCODE_SERVER_TIMEOUT_MS = 120_000' apps/server/src/provider/opencodeRuntime.ts
 
       - name: Resolve build version
         id: ver
@@ -271,5 +281,5 @@ jobs:
           gh release create "$tag" release/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "T3 Code Personal ${{ steps.ver.outputs.version }}" \
-            --notes "Personal build of pingdotgg/t3code@${{ needs.check.outputs.ref }}: upstream-identical except the 20s OpenCode version probe and the T3 Code Personal identity. Installs side-by-side with official T3 Code (own Programs/t3code-personal folder, own update feed) and keeps its own ~/.t3-personal data directory, so the two apps never share a database. First run starts fresh: re-add your project folders (thread history from the shared era stays in the official app). Install once; the app auto-updates from these fork releases afterwards." \
+            --notes "Personal build of pingdotgg/t3code@${{ needs.check.outputs.ref }}: upstream-identical except the 20s OpenCode version probe, the 120s (OPENCODE_SERVER_TIMEOUT_MS-configurable) OpenCode server startup timeout, and the T3 Code Personal identity. Installs side-by-side with official T3 Code (own Programs/t3code-personal folder, own update feed) and keeps its own ~/.t3-personal data directory, so the two apps never share a database. First run starts fresh: re-add your project folders (thread history from the shared era stays in the official app). Install once; the app auto-updates from these fork releases afterwards." \
             $pre

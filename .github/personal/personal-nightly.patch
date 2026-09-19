@@ -1,0 +1,17 @@
+diff --git a/apps/server/src/provider/Layers/OpenCodeProvider.test.ts
+--- a/apps/server/src/provider/Layers/OpenCodeProvider.test.ts
++++ b/apps/server/src/provider/Layers/OpenCodeProvider.test.ts
+@@ -42,7 +42,12 @@ it.effect("reads Go limits with the instance's XDG credentials and preserves res
+         FileSystem.FileSystem,
+         FileSystem.makeNoop({
+           readFileString: (path) => {
+-            NodeAssert.equal(path, "/instance/data/opencode/auth.json");
++            // Normalized so the assertion holds on POSIX and Windows: the
++            // Node path module joins with the platform separator.
++            NodeAssert.equal(
++              path.replaceAll("\\", "/"),
++              "/instance/data/opencode/auth.json",
++            );
+             return Effect.succeed(
+               JSON.stringify({ "opencode-go": { type: "api", key: "instance-key" } }),
+             );

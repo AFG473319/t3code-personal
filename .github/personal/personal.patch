@@ -545,24 +545,9 @@ index 18ddbc66c..49bf05dce 100644
    return resolve(yield* expandHomePath(raw.trim()));
  });
 diff --git a/apps/server/src/provider/Layers/OpenCodeProvider.test.ts b/apps/server/src/provider/Layers/OpenCodeProvider.test.ts
-index b50a51f6c..b9e2d2b9d 100644
 --- a/apps/server/src/provider/Layers/OpenCodeProvider.test.ts
 +++ b/apps/server/src/provider/Layers/OpenCodeProvider.test.ts
-@@ -42,7 +42,12 @@ it.effect("reads Go limits with the instance's XDG credentials and preserves res
-         FileSystem.FileSystem,
-         FileSystem.makeNoop({
-           readFileString: (path) => {
--            NodeAssert.equal(path, "/instance/data/opencode/auth.json");
-+            // Normalized so the assertion holds on POSIX and Windows: the
-+            // Node path module joins with the platform separator.
-+            NodeAssert.equal(
-+              path.replaceAll("\\", "/"),
-+              "/instance/data/opencode/auth.json",
-+            );
-             return Effect.succeed(
-               JSON.stringify({ "opencode-go": { type: "api", key: "instance-key" } }),
-             );
-@@ -366,14 +371,14 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
+@@ -230,7 +230,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
        const probeFiber = yield* checkProvider(makeOpenCodeSettings()).pipe(Effect.forkChild);
  
        yield* Effect.yieldNow;
@@ -571,14 +556,6 @@ index b50a51f6c..b9e2d2b9d 100644
        const snapshot = yield* Fiber.join(probeFiber);
  
        NodeAssert.equal(snapshot.status, "error");
-       NodeAssert.equal(snapshot.installed, true);
-       NodeAssert.equal(
-         snapshot.message,
--        "Failed to execute OpenCode CLI health check: OpenCode CLI version probe timed out after 4 seconds.",
-+        "Failed to execute OpenCode CLI health check: OpenCode CLI version probe timed out after 20 seconds.",
-       );
-     }).pipe(Effect.provide(TestClock.layer())),
-   );
 diff --git a/apps/server/src/provider/Layers/OpenCodeProvider.ts b/apps/server/src/provider/Layers/OpenCodeProvider.ts
 index 0495f8b30..5620f22d0 100644
 --- a/apps/server/src/provider/Layers/OpenCodeProvider.ts
@@ -744,3 +721,98 @@ index 5b16e9f90..822722291 100644
  );
  
  const MODE_ARGS = {
+diff --git a/apps/server/src/provider/opencodeRuntime.environment.test.ts b/apps/server/src/provider/opencodeRuntime.environment.test.ts
+index 680032de0..52acd32bb 100644
+--- a/apps/server/src/provider/opencodeRuntime.environment.test.ts
++++ b/apps/server/src/provider/opencodeRuntime.environment.test.ts
+@@ -16,11 +16,13 @@ import { FetchHttpClient, HttpClient } from "effect/unstable/http";
+ import { describe, expect, it } from "vite-plus/test";
+ 
+ import {
++  DEFAULT_OPENCODE_SERVER_TIMEOUT_MS,
+   OpenCodeRuntime,
+   OpenCodeRuntimeError,
+   OpenCodeRuntimeLive,
+   resolveOpenCodeConfigContent,
+   resolveOpenCodeServerPassword,
++  resolveOpenCodeServerTimeoutMs,
+   verifyOpenCodeServerVersion,
+ } from "./opencodeRuntime.ts";
+ 
+@@ -83,6 +85,31 @@ describe("resolveOpenCodeServerPassword", () => {
+   });
+ });
+ 
++describe("resolveOpenCodeServerTimeoutMs", () => {
++  it("uses the caller environment timeout when provided", () => {
++    expect(resolveOpenCodeServerTimeoutMs({ OPENCODE_SERVER_TIMEOUT_MS: "45000" }, {})).toBe(45000);
++  });
++
++  it("falls back to the inherited environment", () => {
++    expect(
++      resolveOpenCodeServerTimeoutMs(undefined, { OPENCODE_SERVER_TIMEOUT_MS: "180000" }),
++    ).toBe(180000);
++  });
++
++  it("falls back to the default when unset", () => {
++    expect(resolveOpenCodeServerTimeoutMs(undefined, {})).toBe(DEFAULT_OPENCODE_SERVER_TIMEOUT_MS);
++  });
++
++  it("falls back to the default when the override is invalid", () => {
++    expect(
++      resolveOpenCodeServerTimeoutMs({ OPENCODE_SERVER_TIMEOUT_MS: "not-a-number" }, {}),
++    ).toBe(DEFAULT_OPENCODE_SERVER_TIMEOUT_MS);
++    expect(resolveOpenCodeServerTimeoutMs({ OPENCODE_SERVER_TIMEOUT_MS: "-5000" }, {})).toBe(
++      DEFAULT_OPENCODE_SERVER_TIMEOUT_MS,
++    );
++  });
++});
++
+ function makeHealthClient(
+   result: (options?: { readonly signal?: AbortSignal }) => Promise<unknown>,
+ ): OpencodeClient {
+diff --git a/apps/server/src/provider/opencodeRuntime.ts b/apps/server/src/provider/opencodeRuntime.ts
+index e87f758e0..50de4a238 100644
+--- a/apps/server/src/provider/opencodeRuntime.ts
++++ b/apps/server/src/provider/opencodeRuntime.ts
+@@ -78,8 +78,21 @@ export function resolveOpenCodeServerPassword(
+     : input.environment.OPENCODE_SERVER_PASSWORD;
+ }
+ 
++export function resolveOpenCodeServerTimeoutMs(
++  inputEnvironment: Readonly<Record<string, string | undefined>> | undefined,
++  inheritedEnvironment: Readonly<Record<string, string | undefined>> = process.env,
++): number {
++  const raw =
++    inputEnvironment?.OPENCODE_SERVER_TIMEOUT_MS ?? inheritedEnvironment.OPENCODE_SERVER_TIMEOUT_MS;
++  const parsed = raw === undefined ? Number.NaN : Number(raw);
++  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_OPENCODE_SERVER_TIMEOUT_MS;
++}
++
+ const OPENCODE_SERVER_READY_PREFIX = "opencode server listening";
+-const DEFAULT_OPENCODE_SERVER_TIMEOUT_MS = 30_000;
++// Cold starts on slow hardware (Node boot + provider/config scan) can take
++// well over 30s, so the default allows two minutes; true hangs are rarer than
++// slow machines. Users can raise it further with OPENCODE_SERVER_TIMEOUT_MS.
++export const DEFAULT_OPENCODE_SERVER_TIMEOUT_MS = 120_000;
+ const DEFAULT_HOSTNAME = "127.0.0.1";
+ const OPENCODE_SERVER_STARTUP_MAX_OUTPUT_CHARS = 64 * 1024;
+ const OPENCODE_SKILL_DISCOVERY_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
+@@ -684,7 +697,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
+               }),
+           ),
+         ));
+-      const timeoutMs = input.timeoutMs ?? DEFAULT_OPENCODE_SERVER_TIMEOUT_MS;
++      const timeoutMs = input.timeoutMs ?? resolveOpenCodeServerTimeoutMs(input.environment);
+       const args = ["serve", `--hostname=${hostname}`, `--port=${port}`];
+       const spawnCommand = yield* resolveCommand(input.binaryPath, args, input.environment);
+       const serverPassword = resolveOpenCodeServerPassword({
+@@ -830,7 +843,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
+       if (Option.isNone(readyOption)) {
+         return yield* new OpenCodeRuntimeError({
+           operation: "startOpenCodeServerProcess",
+-          detail: `Timed out waiting for OpenCode server start after ${timeoutMs}ms.`,
++          detail: `Timed out waiting for OpenCode server start after ${timeoutMs}ms. Set OPENCODE_SERVER_TIMEOUT_MS to allow more startup time.`,
+         });
+       }
+ 
