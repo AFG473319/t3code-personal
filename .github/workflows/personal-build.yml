@@ -210,6 +210,12 @@ jobs:
         # every workspace, e.g. apps/marketing needs its astro binary.
         run: vp install
 
+      - name: Ensure Electron runtime is installed
+        # Without this, the desktop test files race to download and unpack the
+        # Electron binary in parallel workers ("os error 183" on dist/locales)
+        # whenever the runner cache misses.
+        run: vp run --filter @t3tools/desktop ensure:electron
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
