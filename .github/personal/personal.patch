@@ -816,3 +816,923 @@ index e87f758e0..50de4a238 100644
          });
        }
  
+diff --git a/apps/desktop/src/app/DesktopPreReadyPlatform.performance.test.ts b/apps/desktop/src/app/DesktopPreReadyPlatform.performance.test.ts
+new file mode 100644
+index 0000000..10ebbbd
+--- /dev/null
++++ b/apps/desktop/src/app/DesktopPreReadyPlatform.performance.test.ts
+@@ -0,0 +1,96 @@
++import { assert, describe, it } from "@effect/vitest";
++import { afterEach, vi } from "vite-plus/test";
++
++import { HARDWARE_PROFILE_ENV } from "@t3tools/shared/performanceProfile";
++
++import { resolveLowEndElectronSwitches } from "./DesktopPreReadyPlatform.ts";
++
++vi.mock("electron", () => ({
++  app: {
++    commandLine: {
++      appendSwitch: () => {},
++      getSwitchValue: () => "",
++      hasSwitch: () => false,
++      removeSwitch: () => {},
++    },
++    getVersion: () => "0.0.0",
++    registerSchemesAsPrivileged: () => {},
++    setDesktopName: () => {},
++  },
++}));
++
++const GIB = 1024 ** 3;
++const LOW_END_LAPTOP = { cpuCount: 4, totalMemoryBytes: 8 * GIB };
++const FAST_MACHINE = { cpuCount: 16, totalMemoryBytes: 32 * GIB };
++
++afterEach(() => vi.unstubAllEnvs());
++
++describe("resolveLowEndElectronSwitches", () => {
++  it("launches a slow Windows machine with the low-end switches", () => {
++    assert.deepEqual(
++      resolveLowEndElectronSwitches({
++        platform: "win32",
++        facts: LOW_END_LAPTOP,
++        environment: {},
++      }),
++      [
++        { name: "enable-low-end-device-mode" },
++        {
++          name: "disable-features",
++          value: "SpareRendererForSitePerProcess,CalculateNativeWinOcclusion",
++        },
++      ],
++    );
++  });
++
++  it("leaves a fast machine on Electron's defaults", () => {
++    assert.deepEqual(
++      resolveLowEndElectronSwitches({ platform: "win32", facts: FAST_MACHINE, environment: {} }),
++      [],
++    );
++  });
++
++  it("keeps the occlusion fix off other platforms, in one disable-features value", () => {
++    assert.deepEqual(
++      resolveLowEndElectronSwitches({ platform: "linux", facts: LOW_END_LAPTOP, environment: {} }),
++      [
++        { name: "enable-low-end-device-mode" },
++        { name: "disable-features", value: "SpareRendererForSitePerProcess" },
++      ],
++    );
++  });
++
++  it("honors a stored low-end selection on a machine that looks fast", () => {
++    const switches = resolveLowEndElectronSwitches({
++      platform: "win32",
++      facts: FAST_MACHINE,
++      selection: "low-end",
++      environment: {},
++    });
++    assert.isTrue(switches.some((entry) => entry.name === "enable-low-end-device-mode"));
++  });
++
++  it("honors a stored standard selection on a machine that looks slow", () => {
++    assert.deepEqual(
++      resolveLowEndElectronSwitches({
++        platform: "win32",
++        facts: LOW_END_LAPTOP,
++        selection: "standard",
++        environment: {},
++      }),
++      [],
++    );
++  });
++
++  it("lets the environment override the stored selection", () => {
++    assert.deepEqual(
++      resolveLowEndElectronSwitches({
++        platform: "win32",
++        facts: FAST_MACHINE,
++        selection: "standard",
++        environment: { [HARDWARE_PROFILE_ENV]: "low-end" },
++      }).length,
++      2,
++    );
++  });
++});
+diff --git a/apps/desktop/src/app/DesktopPreReadyPlatform.ts b/apps/desktop/src/app/DesktopPreReadyPlatform.ts
+index c07334f..8822cbb 100644
+--- a/apps/desktop/src/app/DesktopPreReadyPlatform.ts
++++ b/apps/desktop/src/app/DesktopPreReadyPlatform.ts
+@@ -7,7 +7,14 @@ import * as Effect from "effect/Effect";
+ import * as Layer from "effect/Layer";
+ 
+ import * as Electron from "electron";
++import type { HardwareProfileSelection } from "@t3tools/contracts";
+ import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
++import {
++  HARDWARE_PROFILE_ENV,
++  parseHardwareProfileSelection,
++  resolveHardwareProfile,
++  type HardwareFacts,
++} from "@t3tools/shared/performanceProfile";
+ 
+ import * as DesktopEarlyElectronStartup from "./DesktopEarlyElectronStartup.ts";
+ import { resolveDesktopAppBranding } from "./DesktopEnvironment.ts";
+@@ -31,6 +38,55 @@ function readCommandLineSwitchValue(
+   return value.length > 0 ? value : null;
+ }
+ 
++export interface DesktopElectronSwitch {
++  readonly name: string;
++  readonly value?: string;
++}
++
++/**
++ * The Chromium switches that make the app lighter on a machine this small.
++ * Resolved pre-ready because Chromium reads its switch list once, before the
++ * first window exists, and because the user's alternative to a slow app here is
++ * a frozen one: `CalculateNativeWinOcclusion` polling is a known cause of
++ * Windows windows that stop repainting on older GPU drivers, and the spare
++ * renderer is a whole extra process this app never needs to show one window.
++ * `enable-low-end-device-mode` is Chromium's own low-end tuning — smaller
++ * caches and fewer background subsystems, same UI.
++ *
++ * This classifies the machine the window is drawn on rather than reading the
++ * server's `hardwareProfile`: the server can be remote, and a remote machine's
++ * speed says nothing about this one's GPU. `T3_HARDWARE_PROFILE` overrides
++ * both sides at once.
++ */
++export function resolveLowEndElectronSwitches(input: {
++  readonly platform: NodeJS.Platform;
++  readonly facts: HardwareFacts;
++  readonly selection?: HardwareProfileSelection | undefined;
++  readonly environment?: Readonly<Record<string, string | undefined>>;
++}): ReadonlyArray<DesktopElectronSwitch> {
++  const environment = input.environment ?? process.env;
++  const profile = resolveHardwareProfile({
++    // The environment variable wins over the stored setting, matching the
++    // server's resolution order for the same value.
++    selection:
++      parseHardwareProfileSelection(environment[HARDWARE_PROFILE_ENV]) ?? input.selection,
++    facts: input.facts,
++  });
++  if (!profile.lowEnd) {
++    return [];
++  }
++  // One switch, one value: Chromium keeps only the last `--disable-features`
++  // it is handed, so the names have to be joined rather than appended twice.
++  const disabledFeatures = [
++    "SpareRendererForSitePerProcess",
++    ...(input.platform === "win32" ? ["CalculateNativeWinOcclusion"] : []),
++  ];
++  return [
++    { name: "enable-low-end-device-mode" },
++    { name: "disable-features", value: disabledFeatures.join(",") },
++  ];
++}
++
+ export const resolveEarlyLinuxElectronOptionsFromProcess =
+   (): DesktopEarlyElectronStartup.EarlyLinuxElectronOptions =>
+     DesktopEarlyElectronStartup.resolveEarlyLinuxElectronOptions({
+@@ -92,6 +148,17 @@ export const make = Effect.gen(function* () {
+       }
+     }
+ 
++    for (const commandLineSwitch of resolveLowEndElectronSwitches({
++      platform,
++      facts: { cpuCount: NodeOS.cpus().length, totalMemoryBytes: NodeOS.totalmem() },
++    })) {
++      if (commandLineSwitch.value === undefined) {
++        Electron.app.commandLine.appendSwitch(commandLineSwitch.name);
++      } else {
++        Electron.app.commandLine.appendSwitch(commandLineSwitch.name, commandLineSwitch.value);
++      }
++    }
++
+     return { linux, linuxPasswordStoreCommandLine };
+   });
+ }).pipe(Effect.withSpan("desktop.electron.configureBeforeReady"));
+diff --git a/apps/server/src/hardwareProfile.test.ts b/apps/server/src/hardwareProfile.test.ts
+new file mode 100644
+index 0000000..423cd66
+--- /dev/null
++++ b/apps/server/src/hardwareProfile.test.ts
+@@ -0,0 +1,79 @@
++import { afterEach, describe, expect, it, vi } from "vite-plus/test";
++
++import {
++  HARDWARE_PROFILE_ENV,
++  configureHardwareProfile,
++  currentHardwareProfile,
++  resetConfiguredHardwareProfile,
++  resolveProcessHardwareProfile,
++  scaledTimeoutMs,
++} from "./hardwareProfile.ts";
++
++const GIB = 1024 ** 3;
++
++// The laptop this exists for, and a machine that must keep its budgets.
++const LOW_END_LAPTOP = { cpuCount: 4, totalMemoryBytes: 8 * GIB };
++const FAST_MACHINE = { cpuCount: 16, totalMemoryBytes: 32 * GIB };
++
++afterEach(() => {
++  resetConfiguredHardwareProfile();
++  vi.unstubAllEnvs();
++});
++
++describe("resolveProcessHardwareProfile", () => {
++  it("classifies the machine when nothing is configured", () => {
++    expect(resolveProcessHardwareProfile({ facts: LOW_END_LAPTOP }).lowEnd).toBe(true);
++    expect(resolveProcessHardwareProfile({ facts: FAST_MACHINE }).lowEnd).toBe(false);
++  });
++
++  it("uses the configured selection on a machine that looks fast", () => {
++    configureHardwareProfile("low-end");
++    expect(resolveProcessHardwareProfile({ facts: FAST_MACHINE })).toMatchObject({
++      lowEnd: true,
++      timeoutScale: 5,
++    });
++  });
++
++  it("lets the environment override the configured selection", () => {
++    configureHardwareProfile("low-end");
++    vi.stubEnv(HARDWARE_PROFILE_ENV, "standard");
++    expect(resolveProcessHardwareProfile({ facts: LOW_END_LAPTOP }).lowEnd).toBe(false);
++
++    configureHardwareProfile("standard");
++    vi.stubEnv(HARDWARE_PROFILE_ENV, "low-end");
++    expect(resolveProcessHardwareProfile({ facts: FAST_MACHINE }).lowEnd).toBe(true);
++  });
++
++  it("lets an explicit selection beat the configured one", () => {
++    configureHardwareProfile("low-end");
++    expect(resolveProcessHardwareProfile({ selection: "standard", facts: LOW_END_LAPTOP })).toMatchObject({
++      selection: "standard",
++      lowEnd: false,
++    });
++  });
++
++  it("ignores an unrecognized environment value", () => {
++    vi.stubEnv(HARDWARE_PROFILE_ENV, "not-a-profile");
++    configureHardwareProfile("low-end");
++    expect(resolveProcessHardwareProfile({ facts: FAST_MACHINE }).lowEnd).toBe(true);
++  });
++});
++
++describe("scaledTimeoutMs", () => {
++  it("hands a low-end machine the longer budget its cold starts needed", () => {
++    // What the OpenCode version probe was raised to by hand on the machine this
++    // profile is built for: 4s to 20s.
++    configureHardwareProfile("low-end");
++    expect(scaledTimeoutMs(4_000)).toBe(20_000);
++  });
++
++  it("leaves a fast machine on the base budget", () => {
++    configureHardwareProfile("standard");
++    expect(scaledTimeoutMs(4_000)).toBe(4_000);
++  });
++
++  it("falls back to this machine's classification when nothing is configured", () => {
++    vi.stubEnv(HARDWARE_PROFILE_ENV, "standard");
++    expect(currentHardwareProfile().lowEnd).toBe(false);
++  });
++});
+diff --git a/apps/server/src/hardwareProfile.ts b/apps/server/src/hardwareProfile.ts
+new file mode 100644
+index 0000000..6830163
+--- /dev/null
++++ b/apps/server/src/hardwareProfile.ts
+@@ -0,0 +1,78 @@
++import * as NodeOS from "node:os";
++
++import type { HardwareProfileSelection } from "@t3tools/contracts";
++import {
++  HARDWARE_PROFILE_ENV,
++  parseHardwareProfileSelection,
++  resolveHardwareProfile,
++  scaleTimeoutMs as scaleMs,
++  type HardwareFacts,
++  type ResolvedHardwareProfile,
++} from "@t3tools/shared/performanceProfile";
++
++export { HARDWARE_PROFILE_ENV };
++
++/**
++ * The process-wide answer to "how slow is this machine?", in the form provider
++ * layers need it: how long a cold start is allowed to take.
++ *
++ * Probe budgets live deep inside provider layers, as module-scope constants
++ * read before — and independently of — anything that can read settings:
++ * `opencode --version` gets 4s, `grok models` 10s, the Cursor ACP handshake
++ * 15s. Those numbers are sized for a fast developer machine, so on a slow
++ * laptop the cold start loses the race and the user is told the provider is
++ * broken or missing. Each of those budgets asks this module instead of
++ * hard-coding, so one setting moves all of them.
++ *
++ * A module-level value rather than a service: how slow the box is, is a
++ * property of the box rather than of a request, and `auto` needs no I/O, so a
++ * probe that runs before the server has read `settings.json` still gets this
++ * machine's correct answer. The settings read only refines an explicit
++ * `low-end`/`standard` choice, which is why a failed settings read leaves the
++ * holder at `auto` rather than failing anything.
++ */
++
++let configuredSelection: HardwareProfileSelection | undefined;
++
++const readProcessHardwareFacts = (): HardwareFacts => ({
++  cpuCount: NodeOS.cpus().length,
++  totalMemoryBytes: NodeOS.totalmem(),
++});
++
++/**
++ * Resolution order, most specific first: the environment variable, then the
++ * caller's selection (the settings file), then the last configured selection,
++ * then `auto`.
++ */
++export const resolveProcessHardwareProfile = (input?: {
++  readonly selection?: HardwareProfileSelection | undefined;
++  readonly environment?: Readonly<Record<string, string | undefined>>;
++  readonly facts?: HardwareFacts;
++}): ResolvedHardwareProfile => {
++  const environment = input?.environment ?? process.env;
++  const selection =
++    parseHardwareProfileSelection(environment[HARDWARE_PROFILE_ENV]) ??
++    input?.selection ??
++    configuredSelection;
++  return resolveHardwareProfile({
++    selection,
++    facts: input?.facts ?? readProcessHardwareFacts(),
++  });
++};
++
++/** Called once settings are readable, and again whenever they change. */
++export const configureHardwareProfile = (selection: HardwareProfileSelection): void => {
++  configuredSelection = selection;
++};
++
++/** Forgets the configured selection, returning the process to `auto`. */
++export const resetConfiguredHardwareProfile = (): void => {
++  configuredSelection = undefined;
++};
++
++export const currentHardwareProfile = (): ResolvedHardwareProfile =>
++  resolveProcessHardwareProfile();
++
++/** A cold-start or probe budget, in milliseconds, for this machine. */
++export const scaledTimeoutMs = (baseMs: number): number =>
++  scaleMs(baseMs, currentHardwareProfile().timeoutScale);
+diff --git a/apps/server/src/provider/Drivers/GrokSkills.ts b/apps/server/src/provider/Drivers/GrokSkills.ts
+index 36391e3..b8fab5d 100644
+--- a/apps/server/src/provider/Drivers/GrokSkills.ts
++++ b/apps/server/src/provider/Drivers/GrokSkills.ts
+@@ -22,6 +22,7 @@ import * as Schema from "effect/Schema";
+ import { ChildProcess } from "effect/unstable/process";
+ import { resolveSpawnCommand } from "@t3tools/shared/shell";
+ 
++import { scaledTimeoutMs } from "../../hardwareProfile.ts";
+ import { spawnAndCollect } from "../providerSnapshot.ts";
+ 
+ const GROK_SKILLS_PROBE_TIMEOUT_MS = 4_000;
+@@ -123,7 +124,7 @@ export const discoverGrokSkills = Effect.fn("discoverGrokSkills")(function* (
+           cause,
+         }),
+     ),
+-    Effect.timeoutOption(GROK_SKILLS_PROBE_TIMEOUT_MS),
++    Effect.timeoutOption(scaledTimeoutMs(GROK_SKILLS_PROBE_TIMEOUT_MS)),
+   );
+ 
+   if (Option.isNone(inspectResult)) {
+diff --git a/apps/server/src/provider/Layers/AntigravityProvider.ts b/apps/server/src/provider/Layers/AntigravityProvider.ts
+index 956a5d8..5c29046 100644
+--- a/apps/server/src/provider/Layers/AntigravityProvider.ts
++++ b/apps/server/src/provider/Layers/AntigravityProvider.ts
+@@ -24,6 +24,7 @@ import {
+   makeManualOnlyProviderMaintenanceCapabilities,
+   type ProviderMaintenanceCapabilities,
+ } from "../providerMaintenance.ts";
++import { scaledTimeoutMs } from "../../hardwareProfile.ts";
+ import {
+   buildServerProvider,
+   isCommandMissingCause,
+@@ -32,7 +33,7 @@ import {
+ 
+ const EMPTY_MODEL_CAPABILITIES = createModelCapabilities({ optionDescriptors: [] });
+ const MAX_WORKSPACE_SNAPSHOTS = 32;
+-const HEALTH_CHECK_TIMEOUT = "90 seconds";
++const HEALTH_CHECK_TIMEOUT_MS = 90_000;
+ const SIGN_IN_MESSAGE = "Sign in with Google to use Antigravity.";
+ const AUTH_UNCHECKED_MESSAGE =
+   "Antigravity is installed. Google account access is not checked yet.";
+@@ -172,8 +173,9 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
+   const checkProvider = Effect.fn("checkAntigravityProvider")(function* () {
+     if (!settings.enabled) return yield* getSnapshot;
+     const before = yield* SubscriptionRef.get(metadata);
++    const healthCheckTimeoutMs = scaledTimeoutMs(HEALTH_CHECK_TIMEOUT_MS);
+     const result = yield* options.probe.pipe(
+-      Effect.timeoutOption(HEALTH_CHECK_TIMEOUT),
++      Effect.timeoutOption(healthCheckTimeoutMs),
+       Effect.result,
+     );
+     const initialized =
+@@ -189,7 +191,7 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
+             ? "Antigravity is not installed or its executable could not be found."
+             : failure
+               ? "Antigravity could not complete its local health check."
+-              : `Antigravity did not respond to its local health check within ${HEALTH_CHECK_TIMEOUT}.`;
++              : `Antigravity did not respond to its local health check within ${Math.round(healthCheckTimeoutMs / 1_000)} seconds.`;
+     const supportsTextGeneration =
+       initialized !== undefined ? yield* options.supportsTextGeneration : false;
+     const updatedAt = DateTime.formatIso(yield* DateTime.now);
+diff --git a/apps/server/src/provider/Layers/ClaudeProvider.ts b/apps/server/src/provider/Layers/ClaudeProvider.ts
+index 62d7444..b03b4d3 100644
+--- a/apps/server/src/provider/Layers/ClaudeProvider.ts
++++ b/apps/server/src/provider/Layers/ClaudeProvider.ts
+@@ -22,6 +22,7 @@ import {
+   type SettingSource,
+ } from "@anthropic-ai/claude-agent-sdk";
+ 
++import { scaledTimeoutMs } from "../../hardwareProfile.ts";
+ import {
+   buildServerProvider,
+   COMPACT_SLASH_COMMAND,
+@@ -359,13 +360,13 @@ const probeClaudeCapabilities = (
+       return { q, init };
+     });
+   }).pipe(
+-    Effect.timeout(CAPABILITIES_PROBE_TIMEOUT_MS),
++    Effect.timeout(scaledTimeoutMs(CAPABILITIES_PROBE_TIMEOUT_MS)),
+     Effect.flatMap(({ q, init }) =>
+       Effect.gen(function* () {
+         // Usage has its own deadline so a slow optional request cannot discard initialization.
+         const usageResult = yield* Effect.tryPromise(() =>
+           q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(),
+-        ).pipe(Effect.timeout(DEFAULT_TIMEOUT_MS), Effect.result);
++        ).pipe(Effect.timeout(scaledTimeoutMs(DEFAULT_TIMEOUT_MS)), Effect.result);
+         const usage = Result.isSuccess(usageResult)
+           ? {
+               rate_limits_available: usageResult.success.rate_limits_available,
+@@ -459,7 +460,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
+     claudeSettings,
+     ["--version"],
+     resolvedEnvironment,
+-  ).pipe(Effect.timeoutOption(DEFAULT_TIMEOUT_MS), Effect.result);
++  ).pipe(Effect.timeoutOption(scaledTimeoutMs(DEFAULT_TIMEOUT_MS)), Effect.result);
+ 
+   if (Result.isFailure(versionProbe)) {
+     const error = versionProbe.failure;
+diff --git a/apps/server/src/provider/Layers/CodexProvider.ts b/apps/server/src/provider/Layers/CodexProvider.ts
+index cdf40f7..8000366 100644
+--- a/apps/server/src/provider/Layers/CodexProvider.ts
++++ b/apps/server/src/provider/Layers/CodexProvider.ts
+@@ -32,6 +32,7 @@ import {
+ } from "@t3tools/shared/model";
+ import { resolveSpawnCommand } from "@t3tools/shared/shell";
+ import { codexAppServerArgs, resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
++import { scaledTimeoutMs } from "../../hardwareProfile.ts";
+ import {
+   AUTH_PROBE_TIMEOUT_MS,
+   buildServerProvider,
+@@ -447,7 +448,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
+           rateLimitsByLimitId: response.rateLimitsByLimitId,
+           resetCredits: response.rateLimitResetCredits,
+         })),
+-        Effect.timeoutOption(Duration.millis(RATE_LIMITS_PROBE_TIMEOUT_MS)),
++        Effect.timeoutOption(Duration.millis(scaledTimeoutMs(RATE_LIMITS_PROBE_TIMEOUT_MS))),
+         Effect.map(
+           Option.getOrElse((): CodexRateLimitsProbe => ({
+             failure: "Codex did not answer the usage request.",
+@@ -608,7 +609,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
+     environment: resolvedEnvironment,
+   }).pipe(
+     Effect.scoped,
+-    Effect.timeoutOption(Duration.millis(AUTH_PROBE_TIMEOUT_MS)),
++    Effect.timeoutOption(Duration.millis(scaledTimeoutMs(AUTH_PROBE_TIMEOUT_MS))),
+     Effect.result,
+   );
+ 
+diff --git a/apps/server/src/provider/Layers/CursorProvider.ts b/apps/server/src/provider/Layers/CursorProvider.ts
+index 6a8b93c..6228a66 100644
+--- a/apps/server/src/provider/Layers/CursorProvider.ts
++++ b/apps/server/src/provider/Layers/CursorProvider.ts
+@@ -34,6 +34,7 @@ import {
+ } from "@t3tools/shared/model";
+ import { resolveSpawnCommand } from "@t3tools/shared/shell";
+ 
++import { scaledTimeoutMs } from "../../hardwareProfile.ts";
+ import {
+   buildBooleanOptionDescriptor,
+   buildSelectOptionDescriptor,
+@@ -1126,7 +1127,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
+ 
+   // Single `agent about` probe: returns version + auth status in one call.
+   const aboutProbe = yield* runCursorAboutCommand(cursorSettings, environment).pipe(
+-    Effect.timeoutOption(ABOUT_TIMEOUT_MS),
++    Effect.timeoutOption(scaledTimeoutMs(ABOUT_TIMEOUT_MS)),
+     Effect.result,
+   );
+ 
+@@ -1195,12 +1196,13 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
+   }
+   let discoveredModels = Option.none<ReadonlyArray<ServerProviderModel>>();
+   let discoveryWarning: string | undefined;
++  const discoveryTimeoutMs = scaledTimeoutMs(CURSOR_ACP_MODEL_DISCOVERY_TIMEOUT_MS);
+   if (parsed.auth.status !== "unauthenticated") {
+     const discoveryExit = yield* Effect.exit(
+       (discoverModels
+         ? discoverModels(parsed)
+         : discoverCursorModelsViaAcp(cursorSettings, environment)
+-      ).pipe(Effect.timeoutOption(CURSOR_ACP_MODEL_DISCOVERY_TIMEOUT_MS)),
++      ).pipe(Effect.timeoutOption(discoveryTimeoutMs)),
+     );
+     if (Exit.isFailure(discoveryExit)) {
+       yield* Effect.logWarning("Cursor ACP model discovery failed", {
+@@ -1208,7 +1210,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
+       });
+       discoveryWarning = CURSOR_ACP_MODEL_DISCOVERY_FAILED_MESSAGE;
+     } else if (Option.isNone(discoveryExit.value)) {
+-      discoveryWarning = `Cursor ACP model discovery timed out after ${CURSOR_ACP_MODEL_DISCOVERY_TIMEOUT_MS}ms.`;
++      discoveryWarning = `Cursor ACP model discovery timed out after ${discoveryTimeoutMs}ms.`;
+     } else if (discoveryExit.value.value.length === 0) {
+       discoveryWarning = "Cursor ACP model discovery returned no built-in models.";
+     } else {
+diff --git a/apps/server/src/provider/Layers/GrokProvider.ts b/apps/server/src/provider/Layers/GrokProvider.ts
+index 61cd8a9..f13c409 100644
+--- a/apps/server/src/provider/Layers/GrokProvider.ts
++++ b/apps/server/src/provider/Layers/GrokProvider.ts
+@@ -21,6 +21,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+ import { createModelCapabilities } from "@t3tools/shared/model";
+ import { resolveSpawnCommand } from "@t3tools/shared/shell";
+ 
++import { scaledTimeoutMs } from "../../hardwareProfile.ts";
+ import {
+   AUTH_PROBE_TIMEOUT_MS,
+   buildServerProvider,
+@@ -392,7 +393,7 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
+   }
+ 
+   const versionResult = yield* runGrokCliCommand(grokSettings, ["--version"], environment).pipe(
+-    Effect.timeoutOption(VERSION_PROBE_TIMEOUT_MS),
++    Effect.timeoutOption(scaledTimeoutMs(VERSION_PROBE_TIMEOUT_MS)),
+     Effect.result,
+   );
+ 
+@@ -459,7 +460,7 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
+ 
+   // `grok models` reports login state and model slugs without starting the agent.
+   const modelsResult = yield* runGrokCliCommand(grokSettings, ["models"], environment).pipe(
+-    Effect.timeoutOption(AUTH_PROBE_TIMEOUT_MS),
++    Effect.timeoutOption(scaledTimeoutMs(AUTH_PROBE_TIMEOUT_MS)),
+     Effect.result,
+   );
+   // Only a clean exit is parsed. Failed invocations print help or error text that
+@@ -497,2 +497,2 @@
+-    Effect.timeoutOption(GROK_ACP_INITIALIZE_TIMEOUT_MS),
++    Effect.timeoutOption(scaledTimeoutMs(GROK_ACP_INITIALIZE_TIMEOUT_MS)),
+     Effect.exit,
+diff --git a/apps/server/src/provider/providerMaintenance.ts b/apps/server/src/provider/providerMaintenance.ts
+index 6a11b22..fc3a532 100644
+--- a/apps/server/src/provider/providerMaintenance.ts
++++ b/apps/server/src/provider/providerMaintenance.ts
+@@ -20,9 +20,14 @@ import * as Stream from "effect/Stream";
+ import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+ 
++import { scaledTimeoutMs } from "../hardwareProfile.ts";
++
+ import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
+ 
+ const LATEST_VERSION_CACHE_TTL_MS = 60 * 60 * 1_000;
++// Unlike `HOMEBREW_INFO_TIMEOUT_MS` below, this one waits on the npm registry
++// rather than on a local process, so the hardware profile deliberately leaves
++// it alone: a slow CPU is not why this one would time out.
+ const LATEST_VERSION_TIMEOUT_MS = 4_000;
+ const HOMEBREW_INFO_TIMEOUT_MS = 10_000;
+ const HOMEBREW_INFO_MAX_BYTES = 256 * 1_024;
+@@ -331,7 +336,7 @@ const runHomebrew = Effect.fn("runHomebrew")(function* (
+   });
+   return yield* collect.pipe(
+     Effect.scoped,
+-    Effect.timeoutOption(Duration.millis(HOMEBREW_INFO_TIMEOUT_MS)),
++    Effect.timeoutOption(Duration.millis(scaledTimeoutMs(HOMEBREW_INFO_TIMEOUT_MS))),
+     Effect.map(Option.getOrNull),
+     Effect.catchCause((cause) =>
+       Effect.logWarning("Homebrew probe failed", {
+diff --git a/apps/server/src/provider/providerSnapshot.ts b/apps/server/src/provider/providerSnapshot.ts
+index c5503a1..ce6a39f 100644
+--- a/apps/server/src/provider/providerSnapshot.ts
++++ b/apps/server/src/provider/providerSnapshot.ts
+@@ -20,6 +20,9 @@ import { isWindowsCommandNotFound } from "../processRunner.ts";
+ import { createProviderVersionAdvisory } from "./providerMaintenance.ts";
+ import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
+ 
++// Base probe budgets, sized for a fast machine. Consumers pass them through
++// `scaledTimeoutMs` (see ../hardwareProfile.ts) so a slow machine gets a
++// longer cold start instead of a probe that reports the provider as broken.
+ export const DEFAULT_TIMEOUT_MS = 4_000;
+ // Auth status checks involve disk/network lookups and can be slow on first run (especially Windows)
+ export const AUTH_PROBE_TIMEOUT_MS = 10_000;
+diff --git a/apps/server/src/serverRuntimeStartup.ts b/apps/server/src/serverRuntimeStartup.ts
+index 1468e1e..f03e8fd 100644
+--- a/apps/server/src/serverRuntimeStartup.ts
++++ b/apps/server/src/serverRuntimeStartup.ts
+@@ -31,6 +31,7 @@ import * as Queue from "effect/Queue";
+ import * as Ref from "effect/Ref";
+ import * as Schema from "effect/Schema";
+ import * as Scope from "effect/Scope";
++import * as Stream from "effect/Stream";
+ 
+ import * as ServerConfig from "./config.ts";
+ import * as Keybindings from "./keybindings.ts";
+@@ -49,6 +50,7 @@ import * as ProviderSessionReaper from "./provider/Services/ProviderSessionReape
+ import { forkParked } from "./serverActivation.ts";
+ import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
+ import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
++import * as HardwareProfile from "./hardwareProfile.ts";
+ import {
+   formatHeadlessServeOutput,
+   formatHostForUrl,
+@@ -960,6 +962,32 @@ export const make = (options?: StartupOptions) =>
+         ),
+       );
+ 
++      // Provider layers read their probe budgets from the process-wide hardware
++      // profile as they are built, so this has to land before they build, and
++      // the subscription keeps a settings edit from needing a restart.
++      yield* runStartupPhase(
++        "settings.hardware-profile",
++        Effect.gen(function* () {
++          const settings = yield* serverSettings.getSettings;
++          HardwareProfile.configureHardwareProfile(settings.hardwareProfile);
++          const changes = yield* serverSettings.subscribeChanges;
++          yield* changes.pipe(
++            Stream.map((next) => next.hardwareProfile),
++            Stream.changes,
++            Stream.runForEach((selection) =>
++              Effect.sync(() => HardwareProfile.configureHardwareProfile(selection)),
++            ),
++            Effect.forkScoped,
++          );
++        }).pipe(
++          // `auto` is still the right answer for a machine whose settings could
++          // not be read, so this never fails startup.
++          Effect.catch((cause) =>
++            Effect.logWarning("failed to resolve the hardware profile", { cause }),
++          ),
++        ),
++      );
++
+       yield* Effect.logDebug("startup phase: parking orchestration roots at activation");
+       yield* runStartupPhase(
+         "reactors.start",
+diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
+index 42e91a7..fbf3e27 100644
+--- a/packages/contracts/src/settings.ts
++++ b/packages/contracts/src/settings.ts
+@@ -929,6 +929,15 @@ export const BackgroundActivityProfileSelection = Schema.Literals([
+   "custom",
+ ]);
+ export type BackgroundActivityProfileSelection = typeof BackgroundActivityProfileSelection.Type;
++/**
++ * How slow the machine running this environment is. `auto` classifies the box
++ * from its CPU count and installed memory; `low-end` and `standard` pin the
++ * classification for machines auto-detection gets wrong (containers that
++ * report the host's cores, a fast disk in a slow laptop, and so on).
++ */
++export const HardwareProfileSelection = Schema.Literals(["auto", "low-end", "standard"]);
++export type HardwareProfileSelection = typeof HardwareProfileSelection.Type;
++export const DEFAULT_HARDWARE_PROFILE_SELECTION: HardwareProfileSelection = "auto";
+ 
+ export const BackgroundActivityOverrides = Schema.Struct({
+   automaticGitFetchInterval: Schema.optionalKey(Schema.DurationFromMillis),
+@@ -1148,6 +1157,17 @@ export const ServerSettings = Schema.Struct({
+   ),
+   backgroundActivityProfile: BackgroundActivityProfile.pipe(
+     Schema.withDecodingDefault(Effect.succeed(DEFAULT_BACKGROUND_ACTIVITY_PROFILE)),
++  ),  /**
++   * Slow-machine handling, which is about cold-start *budgets* rather than
++   * background work: provider CLI probes and readiness checks are given more
++   * time before they are reported as failures. `backgroundActivity` is the
++   * lever for how much work the environment does; this one is for how much
++   * time it is allowed to take. Server-authoritative and environment-wide,
++   * because the machine either is or is not slow for every client attached to
++   * it.
++   */
++  hardwareProfile: HardwareProfileSelection.pipe(
++    Schema.withDecodingDefault(Effect.succeed(DEFAULT_HARDWARE_PROFILE_SELECTION)),
+   ),
+   defaultTheme: DefaultThemePreference.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+   /**
+@@ -1464,6 +1484,7 @@ export const ServerSettingsPatch = Schema.Struct({
+   automaticGitFetchInterval: Schema.optionalKey(Schema.DurationFromMillis),
+   providerHealthRefreshInterval: Schema.optionalKey(Schema.DurationFromMillis),
+   backgroundActivityProfile: Schema.optionalKey(BackgroundActivityProfile),
++  hardwareProfile: Schema.optionalKey(HardwareProfileSelection),
+   environmentIcon: Schema.optionalKey(Schema.NullOr(EnvironmentMachineKind)),
+   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
+   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
+diff --git a/packages/shared/package.json b/packages/shared/package.json
+index 97452f4..927ef2e 100644
+--- a/packages/shared/package.json
++++ b/packages/shared/package.json
+@@ -31,6 +31,10 @@
+       "types": "./src/model.ts",
+       "import": "./src/model.ts"
+     },
++    "./performanceProfile": {
++      "types": "./src/performanceProfile.ts",
++      "import": "./src/performanceProfile.ts"
++    },
+     "./advertisedEndpoint": {
+       "types": "./src/advertisedEndpoint.ts",
+       "import": "./src/advertisedEndpoint.ts"
+diff --git a/packages/shared/src/performanceProfile.test.ts b/packages/shared/src/performanceProfile.test.ts
+new file mode 100644
+index 0000000..d583edc
+--- /dev/null
++++ b/packages/shared/src/performanceProfile.test.ts
+@@ -0,0 +1,88 @@
++import { assert, describe, it } from "@effect/vitest";
++
++import {
++  LOW_END_TIMEOUT_SCALE,
++  detectLowEndHardware,
++  parseHardwareProfileSelection,
++  resolveHardwareProfile,
++  scaleTimeoutMs,
++} from "./performanceProfile.ts";
++
++const GIB = 1024 ** 3;
++
++// The machine this classification exists for: a Core i5-2450M (2 cores, 4
++// threads) with 8 GB of memory.
++const LOW_END_LAPTOP = { cpuCount: 4, totalMemoryBytes: 8 * GIB };
++// A continuous-integration runner. It must stay on unscaled budgets, or every
++// existing probe assertion changes with the machine the suite runs on.
++const CI_RUNNER = { cpuCount: 4, totalMemoryBytes: 16 * GIB };
++
++describe("detectLowEndHardware", () => {
++  it("classifies a dual-core laptop as low-end", () => {
++    assert.isTrue(detectLowEndHardware(LOW_END_LAPTOP));
++  });
++
++  it("treats two cores as low-end no matter how much memory is fitted", () => {
++    assert.isTrue(detectLowEndHardware({ cpuCount: 2, totalMemoryBytes: 64 * GIB }));
++  });
++
++  it("leaves a four-thread machine with enough memory alone", () => {
++    assert.isFalse(detectLowEndHardware(CI_RUNNER));
++  });
++
++  it("leaves a fast machine alone", () => {
++    assert.isFalse(detectLowEndHardware({ cpuCount: 16, totalMemoryBytes: 32 * GIB }));
++  });
++});
++
++describe("resolveHardwareProfile", () => {
++  it("classifies the machine when no selection is stored", () => {
++    assert.deepEqual(resolveHardwareProfile({ selection: undefined, facts: LOW_END_LAPTOP }), {
++      selection: "auto",
++      lowEnd: true,
++      timeoutScale: LOW_END_TIMEOUT_SCALE,
++    });
++  });
++
++  it("honors a stored low-end selection on a machine that looks fast", () => {
++    assert.deepEqual(resolveHardwareProfile({ selection: "low-end", facts: CI_RUNNER }), {
++      selection: "low-end",
++      lowEnd: true,
++      timeoutScale: LOW_END_TIMEOUT_SCALE,
++    });
++  });
++
++  it("honors a stored standard selection on a machine that looks slow", () => {
++    assert.deepEqual(resolveHardwareProfile({ selection: "standard", facts: LOW_END_LAPTOP }), {
++      selection: "standard",
++      lowEnd: false,
++      timeoutScale: 1,
++    });
++  });
++});
++
++describe("parseHardwareProfileSelection", () => {
++  it("accepts the stored spellings, trimmed and without regard to case", () => {
++    assert.equal(parseHardwareProfileSelection("low-end"), "low-end");
++    assert.equal(parseHardwareProfileSelection("  LOW-END  "), "low-end");
++    assert.equal(parseHardwareProfileSelection("Standard"), "standard");
++    assert.equal(parseHardwareProfileSelection("auto"), "auto");
++  });
++
++  it("ignores anything else", () => {
++    assert.isUndefined(parseHardwareProfileSelection(undefined));
++    assert.isUndefined(parseHardwareProfileSelection(""));
++    assert.isUndefined(parseHardwareProfileSelection("slow"));
++  });
++});
++
++describe("scaleTimeoutMs", () => {
++  it("leaves a standard machine's budgets untouched", () => {
++    assert.equal(scaleTimeoutMs(4_000, 1), 4_000);
++  });
++
++  it("stretches a low-end machine's budgets", () => {
++    assert.equal(scaleTimeoutMs(4_000, LOW_END_TIMEOUT_SCALE), 20_000);
++    assert.equal(scaleTimeoutMs(8_000, LOW_END_TIMEOUT_SCALE), 40_000);
++  });
++});
+diff --git a/packages/shared/src/performanceProfile.ts b/packages/shared/src/performanceProfile.ts
+new file mode 100644
+index 0000000..f8db4e6
+--- /dev/null
++++ b/packages/shared/src/performanceProfile.ts
+@@ -0,0 +1,92 @@
++import type { HardwareProfileSelection } from "@t3tools/contracts";
++
++/**
++ * The two numbers that decide whether a machine can meet budgets sized for a
++ * development laptop. Both matter independently: CPU decides how long a cold
++ * `node` start takes, memory decides whether the provider processes running
++ * alongside it have room to work.
++ */
++export interface HardwareFacts {
++  readonly cpuCount: number;
++  readonly totalMemoryBytes: number;
++}
++
++export interface ResolvedHardwareProfile {
++  readonly selection: HardwareProfileSelection;
++  readonly lowEnd: boolean;
++  /** Multiplier for cold-start and probe budgets; `1` on a standard machine. */
++  readonly timeoutScale: number;
++}
++
++// Four logical CPUs is every dual-core laptop with hyper-threading, which is
++// the class of machine that keeps hitting the probe budgets. Four-core/eight-
++// thread machines are left alone.
++const LOW_END_MAX_CPU_COUNT = 4;
++// Two cores is slow regardless of how much memory is fitted, so it does not
++// need the memory test that four cores do.
++const LOW_END_UNAMBIGUOUS_CPU_COUNT = 2;
++// 12 GiB rather than 8 GiB: an "8 GB" machine reports slightly more than 8 GiB
++// of installed memory, and a 12 GB machine cold-starts CLIs no faster. The
++// cutoff is what keeps continuous-integration runners (4 vCPU, 16 GiB) out of
++// the low-end bucket, so their existing probe budgets and assertions hold.
++const LOW_END_MAX_TOTAL_MEMORY_BYTES = 12 * 1024 ** 3;
++
++/**
++ * Matches what a slow laptop needed by hand before this existed: its OpenCode
++ * version probe went from 4s to 20s, and its OpenCode server start from 30s to
++ * 120s. Only the deadline grows — a genuine hang still fails, five times
++ * later.
++ */
++export const LOW_END_TIMEOUT_SCALE = 5;
++
++/**
++ * Overrides an environment's stored `hardwareProfile` for one process. Shared
++ * because the server reads it for probe budgets and the desktop app reads it
++ * for the Chromium switches it launches with, and those two must agree.
++ */
++export const HARDWARE_PROFILE_ENV = "T3_HARDWARE_PROFILE";
++
++const HARDWARE_PROFILE_SELECTIONS: ReadonlyArray<HardwareProfileSelection> = [
++  "auto",
++  "low-end",
++  "standard",
++];
++
++/** Reads a `T3_HARDWARE_PROFILE`-style value, ignoring anything unrecognized. */
++export function parseHardwareProfileSelection(
++  value: string | undefined,
++): HardwareProfileSelection | undefined {
++  const trimmed = value?.trim().toLowerCase();
++  return HARDWARE_PROFILE_SELECTIONS.find((selection) => selection === trimmed);
++}
++
++export function detectLowEndHardware(facts: HardwareFacts): boolean {
++  return (
++    facts.cpuCount <= LOW_END_UNAMBIGUOUS_CPU_COUNT ||
++    (facts.cpuCount <= LOW_END_MAX_CPU_COUNT &&
++      facts.totalMemoryBytes <= LOW_END_MAX_TOTAL_MEMORY_BYTES)
++  );
++}
++
++/**
++ * `selection` is the environment's explicit choice; `undefined` behaves as
++ * `auto`, so callers that have not read settings yet still get this machine's
++ * answer.
++ */
++export function resolveHardwareProfile(input: {
++  readonly selection: HardwareProfileSelection | undefined;
++  readonly facts: HardwareFacts;
++}): ResolvedHardwareProfile {
++  const selection = input.selection ?? "auto";
++  const lowEnd =
++    selection === "auto" ? detectLowEndHardware(input.facts) : selection === "low-end";
++  return {
++    selection,
++    lowEnd,
++    timeoutScale: lowEnd ? LOW_END_TIMEOUT_SCALE : 1,
++  };
++}
++
++export function scaleTimeoutMs(baseMs: number, timeoutScale: number): number {
++  return timeoutScale > 1 ? Math.round(baseMs * timeoutScale) : baseMs;
++}

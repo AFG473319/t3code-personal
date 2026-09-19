@@ -2,6 +2,7 @@ name: personal-build
 
 # Personal T3 Code build: any upstream T3 Code version + the tiny personal
 # patch (20s OpenCode version probe, 120s OpenCode server startup timeout,
+# a hardware profile that scales provider probe budgets on slow machines,
 # T3 Code Personal identity, and a fully separate data directory/install
 # slot), packaged as a Windows installer that updates itself from this
 # fork's releases.
@@ -174,6 +175,9 @@ jobs:
           check 'BOOT_SERVICE_NAME = "t3code-personal"' apps/server/src/cloud/bootService.ts
           check 'OPENCODE_VERSION_PROBE_TIMEOUT = "20 seconds"' apps/server/src/provider/Layers/OpenCodeProvider.ts
           check 'DEFAULT_OPENCODE_SERVER_TIMEOUT_MS = 120_000' apps/server/src/provider/opencodeRuntime.ts
+          check 'T3_HARDWARE_PROFILE' packages/shared/src/performanceProfile.ts
+          check 'hardwareProfile: HardwareProfileSelection.pipe' packages/contracts/src/settings.ts
+          check 'scaledTimeoutMs' apps/server/src/hardwareProfile.ts
 
       - name: Resolve build version
         id: ver
@@ -240,11 +244,11 @@ jobs:
       # t3code-personal service, pass. Upstream CI runs this suite on Linux.
       - name: Test patched server suite
         working-directory: apps/server
-        run: vp test run src/provider/Layers/OpenCodeProvider.test.ts src/os-jank.test.ts src/cli/app.test.ts
+        run: vp test run src/provider/Layers/OpenCodeProvider.test.ts src/os-jank.test.ts src/cli/app.test.ts src/hardwareProfile.test.ts
 
       - name: Test patched desktop suites
         working-directory: apps/desktop
-        run: vp test run src/app/DesktopEnvironment.test.ts src/app/DesktopAppIdentity.test.ts src/app/DesktopClerk.test.ts src/app/DesktopPreReadyPlatform.test.ts src/app/DesktopEarlyElectronStartup.test.ts
+        run: vp test run src/app/DesktopEnvironment.test.ts src/app/DesktopAppIdentity.test.ts src/app/DesktopClerk.test.ts src/app/DesktopPreReadyPlatform.test.ts src/app/DesktopPreReadyPlatform.performance.test.ts src/app/DesktopEarlyElectronStartup.test.ts
 
       - name: Test personal dev-runner default home
         working-directory: scripts
@@ -281,5 +285,5 @@ jobs:
           gh release create "$tag" release/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "T3 Code Personal ${{ steps.ver.outputs.version }}" \
-            --notes "Personal build of pingdotgg/t3code@${{ needs.check.outputs.ref }}: upstream-identical except the 20s OpenCode version probe, the 120s (OPENCODE_SERVER_TIMEOUT_MS-configurable) OpenCode server startup timeout, and the T3 Code Personal identity. Installs side-by-side with official T3 Code (own Programs/t3code-personal folder, own update feed) and keeps its own ~/.t3-personal data directory, so the two apps never share a database. First run starts fresh: re-add your project folders (thread history from the shared era stays in the official app). Install once; the app auto-updates from these fork releases afterwards." \
+            --notes "Personal build of pingdotgg/t3code@${{ needs.check.outputs.ref }}: upstream-identical except the 20s OpenCode version probe, the 120s (OPENCODE_SERVER_TIMEOUT_MS-configurable) OpenCode server startup timeout, a hardware profile that gives slow machines 5x provider probe budgets (auto-detected, or T3_HARDWARE_PROFILE / the hardwareProfile setting) plus low-end Chromium tuning in the desktop app, and the T3 Code Personal identity. Installs side-by-side with official T3 Code (own Programs/t3code-personal folder, own update feed) and keeps its own ~/.t3-personal data directory, so the two apps never share a database. First run starts fresh: re-add your project folders (thread history from the shared era stays in the official app). Install once; the app auto-updates from these fork releases afterwards." \
             $pre
