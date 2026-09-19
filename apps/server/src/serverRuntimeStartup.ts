@@ -31,6 +31,7 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "./config.ts";
 import * as Keybindings from "./keybindings.ts";
@@ -49,6 +50,7 @@ import * as ProviderSessionReaper from "./provider/Services/ProviderSessionReape
 import { forkParked } from "./serverActivation.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
+import * as HardwareProfile from "./hardwareProfile.ts";
 import {
   formatHeadlessServeOutput,
   formatHostForUrl,
@@ -956,6 +958,32 @@ export const make = (options?: StartupOptions) =>
               environmentVariable: error.environmentVariable,
               cause: error.cause,
             }),
+          ),
+        ),
+      );
+
+      // Provider layers read their probe budgets from the process-wide hardware
+      // profile as they are built, so this has to land before they build, and
+      // the subscription keeps a settings edit from needing a restart.
+      yield* runStartupPhase(
+        "settings.hardware-profile",
+        Effect.gen(function* () {
+          const settings = yield* serverSettings.getSettings;
+          HardwareProfile.configureHardwareProfile(settings.hardwareProfile);
+          const changes = yield* serverSettings.subscribeChanges;
+          yield* changes.pipe(
+            Stream.map((next) => next.hardwareProfile),
+            Stream.changes,
+            Stream.runForEach((selection) =>
+              Effect.sync(() => HardwareProfile.configureHardwareProfile(selection)),
+            ),
+            Effect.forkScoped,
+          );
+        }).pipe(
+          // `auto` is still the right answer for a machine whose settings could
+          // not be read, so this never fails startup.
+          Effect.catch((cause) =>
+            Effect.logWarning("failed to resolve the hardware profile", { cause }),
           ),
         ),
       );

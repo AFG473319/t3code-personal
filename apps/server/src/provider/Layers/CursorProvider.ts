@@ -34,6 +34,7 @@ import {
 } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
+import { scaledTimeoutMs } from "../../hardwareProfile.ts";
 import {
   buildBooleanOptionDescriptor,
   buildSelectOptionDescriptor,
@@ -1126,7 +1127,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
 
   // Single `agent about` probe: returns version + auth status in one call.
   const aboutProbe = yield* runCursorAboutCommand(cursorSettings, environment).pipe(
-    Effect.timeoutOption(ABOUT_TIMEOUT_MS),
+    Effect.timeoutOption(scaledTimeoutMs(ABOUT_TIMEOUT_MS)),
     Effect.result,
   );
 
@@ -1195,12 +1196,13 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
   }
   let discoveredModels = Option.none<ReadonlyArray<ServerProviderModel>>();
   let discoveryWarning: string | undefined;
+  const discoveryTimeoutMs = scaledTimeoutMs(CURSOR_ACP_MODEL_DISCOVERY_TIMEOUT_MS);
   if (parsed.auth.status !== "unauthenticated") {
     const discoveryExit = yield* Effect.exit(
       (discoverModels
         ? discoverModels(parsed)
         : discoverCursorModelsViaAcp(cursorSettings, environment)
-      ).pipe(Effect.timeoutOption(CURSOR_ACP_MODEL_DISCOVERY_TIMEOUT_MS)),
+      ).pipe(Effect.timeoutOption(discoveryTimeoutMs)),
     );
     if (Exit.isFailure(discoveryExit)) {
       yield* Effect.logWarning("Cursor ACP model discovery failed", {
@@ -1208,7 +1210,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
       });
       discoveryWarning = CURSOR_ACP_MODEL_DISCOVERY_FAILED_MESSAGE;
     } else if (Option.isNone(discoveryExit.value)) {
-      discoveryWarning = `Cursor ACP model discovery timed out after ${CURSOR_ACP_MODEL_DISCOVERY_TIMEOUT_MS}ms.`;
+      discoveryWarning = `Cursor ACP model discovery timed out after ${discoveryTimeoutMs}ms.`;
     } else if (discoveryExit.value.value.length === 0) {
       discoveryWarning = "Cursor ACP model discovery returned no built-in models.";
     } else {

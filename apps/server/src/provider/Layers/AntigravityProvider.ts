@@ -24,6 +24,7 @@ import {
   makeManualOnlyProviderMaintenanceCapabilities,
   type ProviderMaintenanceCapabilities,
 } from "../providerMaintenance.ts";
+import { scaledTimeoutMs } from "../../hardwareProfile.ts";
 import {
   buildServerProvider,
   isCommandMissingCause,
@@ -32,7 +33,7 @@ import {
 
 const EMPTY_MODEL_CAPABILITIES = createModelCapabilities({ optionDescriptors: [] });
 const MAX_WORKSPACE_SNAPSHOTS = 32;
-const HEALTH_CHECK_TIMEOUT = "90 seconds";
+const HEALTH_CHECK_TIMEOUT_MS = 90_000;
 const SIGN_IN_MESSAGE = "Sign in with Google to use Antigravity.";
 const AUTH_UNCHECKED_MESSAGE =
   "Antigravity is installed. Google account access is not checked yet.";
@@ -172,8 +173,9 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
   const checkProvider = Effect.fn("checkAntigravityProvider")(function* () {
     if (!settings.enabled) return yield* getSnapshot;
     const before = yield* SubscriptionRef.get(metadata);
+    const healthCheckTimeoutMs = scaledTimeoutMs(HEALTH_CHECK_TIMEOUT_MS);
     const result = yield* options.probe.pipe(
-      Effect.timeoutOption(HEALTH_CHECK_TIMEOUT),
+      Effect.timeoutOption(healthCheckTimeoutMs),
       Effect.result,
     );
     const initialized =
@@ -189,7 +191,7 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
             ? "Antigravity is not installed or its executable could not be found."
             : failure
               ? "Antigravity could not complete its local health check."
-              : `Antigravity did not respond to its local health check within ${HEALTH_CHECK_TIMEOUT}.`;
+              : `Antigravity did not respond to its local health check within ${Math.round(healthCheckTimeoutMs / 1_000)} seconds.`;
     const supportsTextGeneration =
       initialized !== undefined ? yield* options.supportsTextGeneration : false;
     const updatedAt = DateTime.formatIso(yield* DateTime.now);

@@ -22,6 +22,7 @@ import {
   type SettingSource,
 } from "@anthropic-ai/claude-agent-sdk";
 
+import { scaledTimeoutMs } from "../../hardwareProfile.ts";
 import {
   buildServerProvider,
   COMPACT_SLASH_COMMAND,
@@ -359,13 +360,13 @@ const probeClaudeCapabilities = (
       return { q, init };
     });
   }).pipe(
-    Effect.timeout(CAPABILITIES_PROBE_TIMEOUT_MS),
+    Effect.timeout(scaledTimeoutMs(CAPABILITIES_PROBE_TIMEOUT_MS)),
     Effect.flatMap(({ q, init }) =>
       Effect.gen(function* () {
         // Usage has its own deadline so a slow optional request cannot discard initialization.
         const usageResult = yield* Effect.tryPromise(() =>
           q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(),
-        ).pipe(Effect.timeout(DEFAULT_TIMEOUT_MS), Effect.result);
+        ).pipe(Effect.timeout(scaledTimeoutMs(DEFAULT_TIMEOUT_MS)), Effect.result);
         const usage = Result.isSuccess(usageResult)
           ? {
               rate_limits_available: usageResult.success.rate_limits_available,
@@ -459,7 +460,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     claudeSettings,
     ["--version"],
     resolvedEnvironment,
-  ).pipe(Effect.timeoutOption(DEFAULT_TIMEOUT_MS), Effect.result);
+  ).pipe(Effect.timeoutOption(scaledTimeoutMs(DEFAULT_TIMEOUT_MS)), Effect.result);
 
   if (Result.isFailure(versionProbe)) {
     const error = versionProbe.failure;
