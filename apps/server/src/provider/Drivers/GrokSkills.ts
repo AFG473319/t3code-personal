@@ -22,6 +22,7 @@ import * as Schema from "effect/Schema";
 import { ChildProcess } from "effect/unstable/process";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
+import { scaledTimeoutMs } from "../../hardwareProfile.ts";
 import { spawnAndCollect } from "../providerSnapshot.ts";
 
 const GROK_SKILLS_PROBE_TIMEOUT_MS = 4_000;
@@ -123,7 +124,7 @@ export const discoverGrokSkills = Effect.fn("discoverGrokSkills")(function* (
           cause,
         }),
     ),
-    Effect.timeoutOption(GROK_SKILLS_PROBE_TIMEOUT_MS),
+    Effect.timeoutOption(scaledTimeoutMs(GROK_SKILLS_PROBE_TIMEOUT_MS)),
   );
 
   if (Option.isNone(inspectResult)) {

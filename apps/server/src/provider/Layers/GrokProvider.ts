@@ -21,6 +21,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
+import { scaledTimeoutMs } from "../../hardwareProfile.ts";
 import {
   AUTH_PROBE_TIMEOUT_MS,
   buildServerProvider,
@@ -392,7 +393,7 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
   }
 
   const versionResult = yield* runGrokCliCommand(grokSettings, ["--version"], environment).pipe(
-    Effect.timeoutOption(VERSION_PROBE_TIMEOUT_MS),
+    Effect.timeoutOption(scaledTimeoutMs(VERSION_PROBE_TIMEOUT_MS)),
     Effect.result,
   );
 
@@ -459,7 +460,7 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
 
   // `grok models` reports login state and model slugs without starting the agent.
   const modelsResult = yield* runGrokCliCommand(grokSettings, ["models"], environment).pipe(
-    Effect.timeoutOption(AUTH_PROBE_TIMEOUT_MS),
+    Effect.timeoutOption(scaledTimeoutMs(AUTH_PROBE_TIMEOUT_MS)),
     Effect.result,
   );
   // Only a clean exit is parsed. Failed invocations print help or error text that
@@ -497,7 +498,7 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
   );
 
   const acpExit = yield* discoverGrokMetadataViaAcpInitialize(grokSettings, environment).pipe(
-    Effect.timeoutOption(GROK_ACP_INITIALIZE_TIMEOUT_MS),
+    Effect.timeoutOption(scaledTimeoutMs(GROK_ACP_INITIALIZE_TIMEOUT_MS)),
     Effect.exit,
   );
   const acpMetadata = Exit.isSuccess(acpExit) ? Option.getOrUndefined(acpExit.value) : undefined;

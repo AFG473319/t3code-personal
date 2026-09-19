@@ -929,6 +929,16 @@ export const BackgroundActivityProfileSelection = Schema.Literals([
 ]);
 export type BackgroundActivityProfileSelection = typeof BackgroundActivityProfileSelection.Type;
 
+/**
+ * How slow the machine running this environment is. `auto` classifies the box
+ * from its CPU count and installed memory; `low-end` and `standard` pin the
+ * classification for machines auto-detection gets wrong (containers that
+ * report the host's cores, a fast disk in a slow laptop, and so on).
+ */
+export const HardwareProfileSelection = Schema.Literals(["auto", "low-end", "standard"]);
+export type HardwareProfileSelection = typeof HardwareProfileSelection.Type;
+export const DEFAULT_HARDWARE_PROFILE_SELECTION: HardwareProfileSelection = "auto";
+
 export const BackgroundActivityOverrides = Schema.Struct({
   automaticGitFetchInterval: Schema.optionalKey(Schema.DurationFromMillis),
   providerHealthRefreshInterval: Schema.optionalKey(Schema.DurationFromMillis),
@@ -1147,6 +1157,18 @@ export const ServerSettings = Schema.Struct({
   ),
   backgroundActivityProfile: BackgroundActivityProfile.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_BACKGROUND_ACTIVITY_PROFILE)),
+  ),
+  /**
+   * Slow-machine handling, which is about cold-start *budgets* rather than
+   * background work: provider CLI probes and readiness checks are given more
+   * time before they are reported as failures. `backgroundActivity` is the
+   * lever for how much work the environment does; this one is for how much
+   * time it is allowed to take. Server-authoritative and environment-wide,
+   * because the machine either is or is not slow for every client attached to
+   * it.
+   */
+  hardwareProfile: HardwareProfileSelection.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_HARDWARE_PROFILE_SELECTION)),
   ),
   defaultTheme: DefaultThemePreference.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   /**
@@ -1463,6 +1485,7 @@ export const ServerSettingsPatch = Schema.Struct({
   automaticGitFetchInterval: Schema.optionalKey(Schema.DurationFromMillis),
   providerHealthRefreshInterval: Schema.optionalKey(Schema.DurationFromMillis),
   backgroundActivityProfile: Schema.optionalKey(BackgroundActivityProfile),
+  hardwareProfile: Schema.optionalKey(HardwareProfileSelection),
   environmentIcon: Schema.optionalKey(Schema.NullOr(EnvironmentMachineKind)),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),

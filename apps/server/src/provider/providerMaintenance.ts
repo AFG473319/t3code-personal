@@ -20,9 +20,13 @@ import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
+import { scaledTimeoutMs } from "../hardwareProfile.ts";
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
 
 const LATEST_VERSION_CACHE_TTL_MS = 60 * 60 * 1_000;
+// Unlike `HOMEBREW_INFO_TIMEOUT_MS` below, this one waits on the npm registry
+// rather than on a local process, so the hardware profile deliberately leaves
+// it alone: a slow CPU is not why this one would time out.
 const LATEST_VERSION_TIMEOUT_MS = 4_000;
 const HOMEBREW_INFO_TIMEOUT_MS = 10_000;
 const HOMEBREW_INFO_MAX_BYTES = 256 * 1_024;
@@ -331,7 +335,7 @@ const runHomebrew = Effect.fn("runHomebrew")(function* (
   });
   return yield* collect.pipe(
     Effect.scoped,
-    Effect.timeoutOption(Duration.millis(HOMEBREW_INFO_TIMEOUT_MS)),
+    Effect.timeoutOption(Duration.millis(scaledTimeoutMs(HOMEBREW_INFO_TIMEOUT_MS))),
     Effect.map(Option.getOrNull),
     Effect.catchCause((cause) =>
       Effect.logWarning("Homebrew probe failed", {

@@ -32,6 +32,7 @@ import {
 } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { codexAppServerArgs, resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
+import { scaledTimeoutMs } from "../../hardwareProfile.ts";
 import {
   AUTH_PROBE_TIMEOUT_MS,
   buildServerProvider,
@@ -447,7 +448,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
           rateLimitsByLimitId: response.rateLimitsByLimitId,
           resetCredits: response.rateLimitResetCredits,
         })),
-        Effect.timeoutOption(Duration.millis(RATE_LIMITS_PROBE_TIMEOUT_MS)),
+        Effect.timeoutOption(Duration.millis(scaledTimeoutMs(RATE_LIMITS_PROBE_TIMEOUT_MS))),
         Effect.map(
           Option.getOrElse((): CodexRateLimitsProbe => ({
             failure: "Codex did not answer the usage request.",
@@ -608,7 +609,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     environment: resolvedEnvironment,
   }).pipe(
     Effect.scoped,
-    Effect.timeoutOption(Duration.millis(AUTH_PROBE_TIMEOUT_MS)),
+    Effect.timeoutOption(Duration.millis(scaledTimeoutMs(AUTH_PROBE_TIMEOUT_MS))),
     Effect.result,
   );
 
